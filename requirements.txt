@@ -1,2 +1,5 @@
 Pillow
 tensorflow
+transformers
+torch
+torchvision
