@@ -2,7 +2,17 @@ import tkinter as tk
 from tkinter import colorchooser
 from PIL import Image, ImageDraw
 import io
+import ssl
 
+# Workaround for SSL certificate verification failure on macOS/some environments
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+
+MODEL_ERROR = None
 try:
     import tensorflow as tf
     import numpy as np
@@ -11,8 +21,10 @@ try:
     HAS_TF = True
 except ImportError:
     HAS_TF = False
+    MODEL_ERROR = "TensorFlow not installed."
 except Exception as e:
     HAS_TF = False
+    MODEL_ERROR = f"Error loading model: {e}"
     print(f"Error loading model: {e}")
 
 class DrawingApp:
@@ -117,7 +129,7 @@ class DrawingApp:
 
     def guess_drawing(self):
         if not HAS_TF:
-            self.guess_label.config(text="TensorFlow not installed. Cannot guess.")
+            self.guess_label.config(text=f"Cannot guess. {MODEL_ERROR}")
             return
 
         try:
