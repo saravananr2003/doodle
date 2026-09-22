@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import colorchooser
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps, ImageFilter
 import io
 import ssl
 
@@ -133,8 +133,42 @@ class DrawingApp:
             return
 
         try:
-            # Resize image to 224x224 as required by MobileNetV2
-            img = self.image.resize((224, 224))
+            img = self.image
+
+            # Get bounding box of non-white pixels
+            gray = img.convert("L")
+            inv = Image.eval(gray, lambda x: 255 - x)
+            bbox = inv.getbbox()
+
+            if bbox:
+                # Add padding to bounding box
+                margin = 40
+                w, h = img.size
+                bbox = (
+                    max(0, bbox[0] - margin),
+                    max(0, bbox[1] - margin),
+                    min(w, bbox[2] + margin),
+                    min(h, bbox[3] + margin)
+                )
+
+                cropped = img.crop(bbox)
+
+                # Pad to square
+                cw, ch = cropped.size
+                size = max(cw, ch)
+
+                square_img = Image.new("RGB", (size, size), self.bg_color)
+                square_img.paste(cropped, ((size - cw) // 2, (size - ch) // 2))
+                img = square_img
+
+            # Invert the image (white lines on black background works better for some ImageNet models)
+            img = ImageOps.invert(img)
+
+            # Apply slight blur to thicken lines
+            img = img.filter(ImageFilter.GaussianBlur(1))
+
+            # Resize image to 224x224 as required by MobileNetV2 with LANCZOS for better downsampling
+            img = img.resize((224, 224), Image.Resampling.LANCZOS)
             img_array = tf.keras.preprocessing.image.img_to_array(img)
             img_array = np.expand_dims(img_array, axis=0)
             img_array = preprocess_input(img_array)
