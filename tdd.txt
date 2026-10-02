@@ -1,0 +1,1021 @@
+Entity360 Technical Design
+
+Account and Contact Master Data Management
+
+Version 3.2  |  October 2 2026  |  DRAFT for review
+
+Entity360 resolves first-party and third-party Account and Contact records into persistent, explainable identities, selects governed golden attributes and publishes consistent data to operational and analytical consumers. A cluster containing any current first-party member is a Customer; a nonempty cluster containing only third-party members is a Prospect. This rule applies independently to Account and Contact identity.
+
+The confirmed initial integration is source-file ingestion from local disk. Internal application calls support the UI and processing; external consumer APIs and ADLS integration are deferred. Snowflake and Spark remain proposed mastering technologies from the reference design. Hosting services and control-store products are proposals, not approved requirements. The 1.5B resident-record target needs full-footprint benchmark evidence.
+
+1 Scope and architectural decisions
+
+Area
+
+Initial rollout design
+
+Ingestion
+
+Administrator-configured local base directory with per-source incoming, processing and reject directories.
+
+Mastering
+
+Account and Contact standardization, matching, clustering, stable identity, survivorship, relationships and classification.
+
+Data and control
+
+Versioned mastering authority and transactional configuration, job and stewardship state. Snowflake, Spark and a transactional control store are proposed implementation choices.
+
+Internal integration
+
+UI and background workflows call internal application services. Endpoint contracts are specified only in API Technical Design.
+
+Deferred integrations
+
+External search, matching, enrichment, Customer and Prospect lookup, cloud ADLS integration, external gateways and writeback are outside initial rollout.
+
+Deletion
+
+Immediately exclude a DELETED source identity, purge old evidence and repair its affected clusters before corrected publication.
+
+
+
+2 High level architecture
+
+
+
+Figure 1  Entity360 initial rollout and deferred integration boundary
+
+Local-disk files enter the ingestion service. Normalization, bounded matching, constrained clustering and survivorship produce a governed authority and a validated publication. The Admin and Steward UI uses internal services. A scheduler and control store govern jobs and policies; monitoring observes file access, processing, publication and deletion repair. The dashed future boundary contains external interfaces and ADLS only as deferred integrations.
+
+2 1 Deployment constraints
+
+Local disk is confirmed for source landing, not for the entire 1.5B corpus. Ingestion reads files on the designated host and bulk-loads accepted canonical evidence into the selected mastering authority; distributed workers consume that evidence and their approved work storage. Cross-host mounts, worker storage and distributed checkpoints require a deployment decision. An Azure staging service shall not be introduced as a hidden initial dependency. Proposed products must pass capacity, access and cost evaluation.
+
+3 Sources and downstream contracts
+
+Source family
+
+Content and required controls
+
+Salesforce and channel CRM
+
+Account and Contact IDs, names, account links, ownership, status and permission references. Source classification is FIRST_PARTY even if CRM status is prospect.
+
+SBA and operational accounts
+
+SBA Master, bill-to and ship-to identities, business names, typed addresses, account structures and status. Maintain commercial grain and channel namespace.
+
+Ecommerce and registrations
+
+Enterprise-collected account or person identity where permitted; registration IDs, verified email and event time. Transaction and anonymous clickstream histories stay outside the mastering corpus unless explicitly scoped.
+
+Service and channel systems
+
+Supported Account and Contact records and identifiers, relationship and channel facts. Do not ingest message bodies or case histories solely to create identity evidence.
+
+D&B Data Axle ZoomInfo
+
+Licensed organization, establishment, hierarchy, business attribute and Contact feeds as actually contracted. All direct vendor records are THIRD_PARTY.
+
+MDR GovSpend Definitive Healthcare
+
+Specialized education, government and healthcare Account or Contact data at documented grain and refresh cadence. Licensing and source field availability are contract inputs.
+
+
+
+
+
+Each adapter contract defines source_id, category, domain, namespace, stable record key, identity reuse policy, schema, refresh cadence, extraction watermark, deletion semantics, country, owner and entitlement. A downstream copy of a vendor record remains third-party unless it is genuinely adopted as an enterprise-managed first-party record under an explicit onboarding policy. Source category cannot be inferred from its file location or winning field.
+
+Consumer
+
+Initial and future boundary
+
+Entity360 Admin and Steward UI
+
+Included: internal configuration, operations, review, entity exploration and Customer or Prospect display.
+
+Sales Operations Marketing and analytics
+
+Governed datasets and approved bulk delivery where included in consumer scope; external interactive APIs are deferred.
+
+Salesforce Account Services Quill and service apps
+
+Potential downstream dataset consumers. External lookup, enrichment and writeback require a later integration release.
+
+
+
+4 Canonical data and persistence
+
+Every source identity is scoped by tenant, source, domain, namespace, source_record_id and identity_epoch. An epoch changes when a source key is confirmed recycled. Record versions contain event_time, ingest_time, payload hash, ROW_CREATE_TIMESTAMP, ROW_UPDATE_TIMESTAMP, ROW_STATUS, deletion marker and raw reference. Use 64-bit counters for volumes and globally unique immutable entity IDs. Namespace identifiers and preserve postal and ID leading zeros.
+
+Logical object
+
+Key and minimum fields
+
+source_registry
+
+source_id and version; category FIRST_PARTY or THIRD_PARTY, domain, owner, cadence, lifecycle, deletion policy, entitlements and effective dates
+
+source_record_version
+
+source identity plus version; canonical attributes, normalized values, raw reference, source timestamp, payload hash, quality and tombstone
+
+source_record_current
+
+Latest accepted source version per identity epoch; current contribution flag, as-of source registry and ingest watermark
+
+attribute_assertion
+
+Source version, attribute or coherent group, typed value, verification, quality, validity dates and permitted purpose
+
+candidate_pair and match_decision
+
+Ordered record endpoints, candidate origins, features, score, eligibility gates, outcome, reason, evaluation completeness, rule and model versions
+
+match_constraint
+
+Record or entity endpoints, must-link or cannot-link, scope, effective dates, approver and durable decision ID
+
+entity and membership
+
+Entity ID and grain; member source identities, valid intervals, publication, lifecycle, version and lineage
+
+entity_redirect and split_event
+
+Prior ID, survivor or corrected target mapping, valid time, reason and event ID; splits retain explicit member reassignment
+
+golden_version
+
+Entity ID and release; selected attributes, source winner per field, class, member counts, quality, lineage and effective interval
+
+relationship_version
+
+Typed source and target IDs, hierarchy view or affiliation, role, site, validity, evidence and confidence
+
+contact_point and permission
+
+Typed repeating email, phone or address, owner interval, verification, shared flag, purpose, channel and suppression reference
+
+review_case and decision
+
+Case type, evidence snapshot, assigned owner, status, revision, action, approver, reason and timestamps
+
+policy_bundle and model_version
+
+Immutable mappings, attributes, rules, features, thresholds, source priorities, constraints and artifact checksums
+
+run delivery and checkpoint
+
+UUID run ID, display sequence, source delivery, watermarks, partition lease, stage counts, retries and commit state
+
+publication_manifest and outbox
+
+Release ID, component versions and checksums, pinned policy and registry, active state, parent release, events and consumer acknowledgments
+
+
+
+
+
+Current views resolve a manifest to immutable versions. History distinguishes business effective time from ingestion and publication time; corrected late facts can be queried by both. Relational control tables enforce transactions and uniqueness. Snowflake standard-table primary, unique and foreign-key declarations do not enforce those constraints; application publication checks enforce xref uniqueness, one active membership at each grain, valid endpoints and release completeness [T1].
+
+4 1 Canonical attributes
+
+Accounts: legal and trading names, aliases, namespaced identifiers, organization and Site links, typed addresses and units, country, domain, phones, industry, revenue and employees with source and currency or period, lifecycle, channel and ownership.
+
+Contacts: original and normalized name components, aliases, person identifiers, repeating typed emails and phones with ownership periods, affiliations, title, department, seniority, persona and current versus historical employer evidence.
+
+All goldens: entity_id, entity_type, grain, entity_version, entity_class, first_party_member_count, third_party_member_count, class_reason, classification_rule_version, classification_effective_at, publication_id, resolution_complete, quality and source provenance.
+
+5 Local disk ingestion and standard record contract
+
+Global Configuration stores base_directory, configuration_revision, validation_status, changed_by and effective_at. Source configuration stores incoming_directory, processing_directory and reject_directory as paths beneath the canonical base. Validate traversal, symlink escape, overlapping assignments and read/write permissions. A run pins its configuration revision; changing the base never silently relocates active work.
+
+base_directory/
+  source_a/
+    incoming/
+    processing/
+    reject/
+  source_b/
+    incoming/
+    processing/
+    reject/
+
+The directory tree is illustrative; names are administrator configured. Confirm completed file delivery through an agreed marker, producer rename or verified stability policy. Claim files with a transactional lease and atomic rename where supported. If the filesystem cannot atomically move across locations, use validated copy, checksum and ledger-controlled handoff. Do not assume cross-volume move atomicity.
+
+The delivery ledger records source, identity, checksum, file location, schema, extraction watermark, pinned configuration, stage counts and checkpoints. Content hashes suppress unchanged replay within source identity; equal payloads with distinct source IDs retain independent identity. Keep local file payloads out of unrestricted logs. Rejected rows and reasons go to the source reject directory. Successful-file archive or removal policy remains an open operating decision; no extra required archive directory is assumed.
+
+Column
+
+Technical semantics
+
+ROW_CREATE_TIMESTAMP
+
+UTC creation time for the logical Entity360 source or canonical row, preserved across accepted updates.
+
+ROW_UPDATE_TIMESTAMP
+
+UTC last accepted mutation time, including deletion; preserve source_event_time and source ordering independently.
+
+ROW_STATUS
+
+At least ACTIVE and DELETED. Validate source mapping and status vocabulary; a DELETED identity never contributes matching evidence.
+
+
+
+Adapters explicitly define whether incoming columns are mapped or Entity360 technical columns are populated on ingestion. Missing upstream deletion semantics cannot default silently to ACTIVE. Maintain the columns on current source, canonical and golden row contracts. Removal leaves a minimal tombstone with DELETED and technical timestamps, not a retained payload of deleted attributes. All timestamp definitions are Entity360 technical timestamps unless separately named source timestamps.
+
+For full snapshots, validate completeness before producing deletions. Source sequence or event time controls newer-versus-older facts. Unknown order and equal-time conflicts require deterministic source policy or review; arrival time alone does not override a newer deletion. Disabling ingestion does not remove accepted memberships.
+
+5 1 Deleted source identity processing
+
+Key the exclusion by source_system, entity_type and source_id, extended with namespace and identity epoch where required. Accept the deletion and persist a minimal watermark, then apply that exclusion to candidate generation, scoring, clustering, survivorship, UI evidence and export reads before asynchronous physical purge completes. Concurrent runs carrying an earlier exclusion revision cannot publish obsolete evidence.
+
+Find affected components, accepted memberships, assertions, golden winners, hierarchy and affiliation endpoints and historical derived artifacts before removing evidence.
+
+Purge current and historical source payloads, aliases, features, postings, candidate decisions, edges, membership contributions and cached copies for the identity. Sanitize source-only values from current and historical goldens and relationship evidence.
+
+Remove that member and affected edges; recompute components from remaining valid evidence. A deleted bridge may split an entity. Preserve justified surviving IDs and record corrected successor mappings.
+
+Recompute survivorship, relationships and source counts. Any first-party member means Customer; third-party-only means Prospect; no valid members means retired.
+
+Build and validate corrected publication artifacts. Internal readers obey the exclusion overlay even while remaining on an older release; never expose removed evidence during repair.
+
+Publish correction, split, delete and class-change events or dataset deltas to configured consumers. Reconcile affected counts and verify that no deleted-only value remains.
+
+Purge or sanitize raw and reject rows, processed-file copies, history, indexes, caches and model-training snapshots containing the source identity. Mixed delivery files may require rewriting a sanitized copy or removing the copy under the approved retention policy. Retain minimal deletion audit without reusable source attribute content. Backups are blocked from serving until deletion markers are reapplied; backup expiry and downstream-copy correction timelines require operational approval.
+
+Older replays and restores cannot reinstate a deleted identity. Reactivation or confirmed source-ID reuse requires a separately approved identity-epoch policy; this draft does not automatically interpret an ACTIVE row arriving later as authorization to undo deletion. Test exclusion during in-flight jobs, failed purges and restoration. A purge failure remains visible and retriable while the identity stays excluded.
+
+6 Standardization and data quality
+
+Account transformations retain original values and normalize case, Unicode, spacing, legal suffixes, address directionals, street components, units, postal forms, domain and phone. Generate country-aware name prefixes, phonetic keys, street-number keys, PO-box flags and approved name-address expressions. A PO box is not a physical Site; a shared building is not a shared business.
+
+Contact transformations parse names and aliases, classify personal, business and role-based contact points, preserve email local-part semantics conservatively and use country-aware phones with extensions. Provider-specific email normalization requires explicit validation. Missing values never become invented identifiers. Deleted identities are excluded before all feature and candidate paths, including historical aliases. Shared switchboards and inboxes are weak evidence, not person identifiers.
+
+Quality controls score validity, completeness, freshness and consistency per field and record. Invalid values cannot win survivorship just because the source has higher priority. Expressions run in a restricted structured evaluator, with syntax, type, cardinality and resource checks; do not execute administrator text as arbitrary Python or SQL. The same fixtures verify transform parity across Spark, warehouse and online features.
+
+7 Candidate generation and matching engines
+
+7 1 Account and Contact retrieval
+
+Maintain partitioned key postings against the complete resident evidence corpus. Each changed record searches both same-run changes and accepted resident records. Deduplicate unordered pairs by canonical endpoint ordering and evaluation version, while retaining every candidate origin. Never load the global key index into one driver. Null or empty keys create no posting.
+
+Domain
+
+Candidate patterns
+
+Guardrails
+
+Account
+
+Namespaced ID; domain plus postal; phonetic name plus street and postal; name plus postal; phone plus postal; parent plus postal
+
+Compatible grain and country; parent, domain, address or industry alone cannot prove identity.
+
+Contact
+
+Verified person ID; email plus name; phone plus name; normalized name plus employer; aliases across employers
+
+Shared and recycled channels require ownership periods and supporting evidence; same employer alone is insufficient.
+
+Sparse or multilingual
+
+Alternative transliteration and phonetic forms; evaluated semantic retrieval as Phase 3
+
+Expose retrieval coverage and cap hits; approximate search cannot establish complete absence of a match.
+
+
+
+
+
+Oversized blocks are subdivided using additional compatible features. Remaining difficult blocks enter a deferred queue or a measured secondary strategy. Caps are recorded by source and rule; a top-K truncation cannot silently become a completed non-match. Avoid salting that sends related records to different partitions without a complete reconciliation step. Use Spark partition planning, adaptive execution and skew handling as measured tuning tools [T2].
+
+7 2 Feature scoring and decision
+
+Features include exact identifier agreement, Levenshtein and token similarities, phonetic and alias evidence, address components, unit and country, domain and phone, source agreement and conflicting strong identifiers. Contact features add ownership periods, name evidence and affiliation corroboration. Repeated vendor copies are not independent consensus. Missingness treatment and weight normalization are part of the immutable policy bundle.
+
+Separate Account and Contact models and thresholds are required. The initial rule engine supports numeric weights, compound conditions, scoped gates, AND or OR groups, directional source conditions and hard contradictions. Example Account T_auto 0.95 and T_review 0.85 are provisional configurations, not universally safe operating values. Calibrate on labeled holdouts before promotion.
+
+if evaluation_incomplete: processing_status = "INCOMPLETE"
+
+elif score >= T_auto and all_eligibility_gates:
+
+    match_status = "MATCH_FOUND"
+
+elif score >= T_review or conflict_requires_review:
+
+    match_status = "CANDIDATES_FOUND"
+
+else: match_status = "NO_MATCH"
+
+
+
+Retain candidate origins, feature contributions, reason codes, score type, policy and model version, audit_id and evidence time. A probability claim is permitted only for a calibrated model output; a weighted rule score is labeled as a score. A dependency failure returns an operational error, never NO_MATCH.
+
+8 Constrained clustering and persistent identity
+
+Use distributed candidate edges and explicit constraints to propose compatible connected components. Transitive connectivity alone is insufficient: if A matches B and B matches C but A contradicts C, reject or review the proposed union. Evaluate grain, strong-identifier conflicts, cannot-link constraints, giant-component limits and temporal channel ownership evidence before activating membership. Components that exceed safe budgets remain pending with visible coverage impact. Apply the source-specific pair policies and prospective-cluster cardinality checks in section 25 before accepting any union, including transitive and incremental unions.
+
+Stable IDs are reused when the accepted member identity continues. A true merge retains the approved established survivor, writes retired-ID redirects, remaps relationships and publishes merge events. A split assigns corrected memberships and stable IDs under a documented survivor policy; a prior ID can resolve to a split event with multiple successors rather than silently choosing an arbitrary person. Historical lineage remains available.
+
+A changed record seeds affected neighborhoods; edge insertions can merge components, while deletions can split them. Expand impact across partition boundaries until the component boundary is proven. Recompute memberships, goldens, affiliations, classification and projections together. If safe incremental repair cannot be bounded, defer the impacted component or shadow rebuild it. Do not publish a partial repair as a final identity.
+
+Durable steward decisions are versioned constraints, never overwritten by a refresh. Overlapping repairs use component leases and expected base versions; conflicting runs retry from the latest accepted component state. Global policy changes use a shadow full rebuild, ID migration comparison and approved activation. Match-only and test modes write diagnostic outputs without changing active identity.
+
+9 Customer and Prospect classification engine
+
+The finalized business rule is a direct membership aggregate, independent of match score, surviving source, activity and relationships. Count current eligible nondeleted source identities once each at the entity grain. An accepted member counts even if some of its attributes are null or invalid. Source categories must be valid before publication; an unknown category quarantines or blocks the affected output rather than defaulting to Prospect.
+
+fp = count(distinct eligible member with category FIRST_PARTY)
+
+tp = count(distinct eligible member with category THIRD_PARTY)
+
+if fp > 0: entity_class = "Customer"
+
+elif tp > 0: entity_class = "Prospect"
+
+else: lifecycle = "RETIRED"  # no current Customer or Prospect output
+
+
+
+Membership or event
+
+Account or Contact result
+
+First-party only
+
+Customer; first-party member count supplies the reason.
+
+Mixed first-party and third-party
+
+Customer, even if every golden attribute wins from a vendor.
+
+Third-party only including singleton
+
+Prospect; resolution completeness is reported separately.
+
+First-party CRM record marked prospect
+
+Customer in Entity360; retain CRM prospect status as a separate commercial attribute.
+
+Prospect Contact linked to Customer Account
+
+Contact remains Prospect; Account remains Customer.
+
+Customer Contact linked to Prospect Account
+
+Contact remains Customer; Account remains Prospect.
+
+Inactive first-party member retained
+
+Customer; activity and lifecycle do not remove current membership.
+
+Last first-party member deleted or withdrawn
+
+Prospect if third-party members remain; retire if no members remain.
+
+Merge split or source-category correction
+
+Recompute each resulting cluster; publish prior and new class with lineage.
+
+
+
+
+
+Pin source registry, membership and classification versions to the release. Recompute only affected clusters for routine member changes; a source-category correction identifies all impacted clusters and uses a governed backfill. Store classification_effective_at from accepted membership change, published_at separately, and classification_rule_version. Replaying the same accepted change emits no duplicate logical transition.
+
+Classifying a vendor-only cluster as Prospect describes its current accepted membership. It does not prove there is no undiscovered enterprise duplicate. resolution_complete, deferred_candidate_count, review_state and activation_eligibility stay separate. Class does not grant email or phone permission, transfer ownership, or propagate to parent, branch, Site or affiliation.
+
+10 Survivorship hierarchies and affiliations
+
+An assertion is eligible only if source rights, validity, field quality and lifecycle permit use. A configured coherent survivorship group selects exactly one eligible source-record version; all group values come from it, including null values. Different groups may choose different source rows. Ordered waterfall steps, anchors, source priorities, frequency, business recency and deterministic tie-breaking follow the versioned policy described in section 22. Keep winning reasons and permitted nondeleted losing assertions within retention; DEL rules override retained history.
+
+Typed hierarchies separate legal ownership, ultimate parent, operating structure and commercial bill-to or ship-to. Prevent invalid cycles in tree views; multiple valid views are allowed. Parent changes and acquisitions do not automatically merge entities. Contact affiliations carry employer, Account, Site, role, confidence and valid intervals. A job change need not create a new person; uncertain employers remain unresolved. Multiple simultaneous affiliations are allowed.
+
+Primary email, phone and address are selected separately from permission. First-party suppression and permitted purposes dominate contact delivery. Vendor facts cannot overwrite authoritative ownership, transaction facts or permissions. Steward overrides carry scope, reason, approver and expiry; fresh conflicts prompt review rather than silently deleting an override.
+
+11 Publication consistency and distribution
+
+Prepare immutable release R from base publication B with evidence watermark, registry, policy and model versions. Stage canonical, membership, golden, xref, relationship and classification outputs.
+
+Reconcile uniqueness, referential integrity, member counts, classification, totals, merge and split redirects, entitlements and history. Build required internal query generation R; verify row counts and checksums.
+
+Mark all required artifacts ready. Activate R with compare-and-swap on the active manifest only if B is still current. A conflict rebases or retries; no concurrent run overwrites another release.
+
+Every internal request pins one manifest and uses its matching projections. Warehouse and export readers resolve the same release explicitly. Do not independently swap unrelated current tables and advertise a globally atomic release.
+
+Publish outbox events and consumer manifests only after activation. Idempotent events use event_id, entity_id, entity_version, release_id, operation, prior and new class, changed fields and policy version.
+
+Consumers acknowledge watermarks, deduplicate event IDs and reconcile to a full snapshot at that publication. Handle merge, split, delete, suppression and class-change events explicitly.
+
+There is no distributed transaction across PostgreSQL, Snowflake and serving stores. Immutable artifacts plus a single logical activation pointer provide a release fence. Internal application and export services consult the active manifest; warehouse clients use a release resolver or receive an explicit publication_id. During lag or outage, consumers remain on the previous complete release and report its age. Derived projection lag is monitored rather than hidden.
+
+Urgent deletion and suppression use an independently versioned deny policy evaluated at delivery time, so an older pinned release cannot expose newly prohibited fields. Update or invalidate caches and delivery projections promptly. Backups and restored releases reapply the deny ledger before serving. Previously downloaded files require consumer correction and acknowledgment; the platform cannot silently revoke an offline copy.
+
+12 Internal integration boundary
+
+Initial internal services support application configuration, job control, stewardship and entity exploration. API endpoint definitions, schemas, authentication contracts, status codes, health routes and deployment details are specified in API Technical Design Document. External consumers have no initial search, matching, enrichment or Customer and Prospect lookup interface. The core mastering design supplies service-level data and consistency responsibilities without duplicating API specifications.
+
+13 Stewardship administration and policy release
+
+The UI retains login, source and file configuration, canonical groups and attributes, source mappings, standardization, blocking tests, algorithms and thresholds, grouped and directional match conditions, source priorities, waterfall survivorship, batch and stage history, golden and source exploration, xrefs, hierarchy, affiliations, duplicates, review and configuration audit. Results use server-side pagination, bounded exports and field-level authorization.
+
+Review actions include confirm or reject identity, must-link or cannot-link, merge or split, attribute override, affiliation correction and escalation. A decision records evidence version, expected case revision, actor, approver, reason and scope. Bulk changes require a preview of affected identities and consumers. Administrator, Analyst and Viewer remain supported; Steward, Approver, Operator, Consumer and Auditor capabilities are explicit grants.
+
+Promote policies as immutable bundles through development, test and production. Validate schema, referenced fields, expression safety, contradictory rules, holdout outcomes and blast radius. A running job pins its starting bundle. Rollback restores a policy version and invokes the required affected backfill; it does not magically undo already published identities. Review constraints and privacy decisions remain effective unless separately superseded.
+
+14 Processing health observability and operations
+
+Monitor base and source directory accessibility, free disk, complete-file detection, file claims, queue age, rejects, source freshness, stage latency, skew, spill, failed jobs, deletion backlog, cluster repair and publication age. Track delivery_id, run_id, partition_id and publication_id without logging unrestricted source attributes. Internal API probes and transport contracts are defined in the separate API design.
+
+Alerts cover inaccessible directories, low disk capacity, schema changes, unexpected delete volume, classification shifts, deferred blocks, failed releases, stale policies and missed purge deadlines. Runbooks support pausing sources, correcting rejects, resuming checkpoints, repairing clusters and rebuilding derived artifacts. Operational status shall report service health separately from data freshness.
+
+15 Scale workload and capacity model
+
+The target is 1.5 billion simultaneously resident logical source records across Accounts and Contacts. Historical versions, candidate edges, memberships, raw files, goldens, relationships, audit and backups are additional. Size by record width, source multiplicity, change rate, candidate fan-out and graph impact, not by record count alone. All-pairs comparison would produce about 1.125 quintillion pairs and is excluded.
+
+Illustrative parameter
+
+Sizing implication
+
+Canonical source width 1 KB
+
+1.5B records imply about 1.5 TB logical payload before encoding, indexes, replicas, history and operational overhead. This is a planning illustration, not a storage quote.
+
+10M changed records and 50 candidates each
+
+About 500M candidate evaluations before pair deduplication. At 6 hours this implies roughly 23K evaluations per second plus ingestion, graph and publication work.
+
+10M changes in 6 hours
+
+About 463 accepted changes per second end to end on average. Burst, skew and component repair determine provisioned capacity.
+
+Five percent review at 10M changes
+
+Up to 500K affected records; aggregate into unique cases and staff by handling time. A low review rate is not permission to accept unsafe matches.
+
+Current source and key projections
+
+Partition by stable source identity for reads and key namespace or hash for postings. Avoid daily partitions alone for point retrieval.
+
+Golden and relationship projections
+
+Shard by tenant, domain and entity hash; bound relationship depth and page size. Large parents and common contact channels require hot-key strategies.
+
+
+
+
+
+For each storage surface, estimate count × observed bytes × retention or history factor × replication factor, then add measured index, backup and compaction costs. Candidate evidence may dominate; retain required decision lineage and sample diagnostic nonmatches under an approved policy. Do not specify a fixed cluster size without measured work distribution. Batch and online compute have separate quotas and failure domains.
+
+15 1 Proposed service gates
+
+Measure
+
+Planning gate and limitation
+
+Nightly delta
+
+10M accepted changes through consistent publication in under 6 hours against the full 1.5B corpus, subject to approved candidate fan-out and graph-impact profile.
+
+Interactive UI
+
+p95 under 2 seconds for first-page requests; cached summary planning target under 100 ms. Full corpus exports remain async.
+
+Availability and recovery
+
+Proposed 99.9 percent monthly online availability, 15-minute RPO for accepted transactional changes and four-hour RTO. Ratify exclusions and replayable batch recovery separately.
+
+Accuracy
+
+Inherited targets: precision at least 98 percent and duplicate recall at least 95 percent. Consider 99.5 percent auto-merge precision for sensitive identities after stratified holdout validation.
+
+Initial load and full rematch
+
+Duration and cost remain open until 10M, 100M, 500M and 1.5B benchmarks. Smaller tests do not prove full-scale operation.
+
+
+
+
+
+The inherited stage targets for 10M blocking, 1M candidate matches and a selected clustering workload are separate planning measures. They are not a coherent guarantee for a 500M-pair delta. End-to-end acceptance explicitly measures the generated pair distribution and affected graph; performance extrapolation cannot replace the 1.5B release gate.
+
+16 Security entitlements deletion and recovery
+
+Use enterprise SSO and managed service identity, private connectivity where supported, least-privilege scopes, encryption in transit and at rest and approved secret rotation. Authorize UI, API, warehouse, exports and evidence drill-down consistently. Field-level permitted purpose, vendor license period, Contact suppression and country rules are policy assertions evaluated on output. Merging cannot broaden permission.
+
+Retention schedules cover raw deliveries and retained nondeleted canonical and golden history, match evidence, labels, candidate stores, caches, exports and backups. Deletions propagate tombstones, invalidate projections and publish consumer corrections; preserve only permitted minimal audit evidence. Legal holds and exceptions are explicitly governed. Purge acceptance reconciles active surfaces, and restore tests reapply tombstone and deny ledgers before enabling serving.
+
+Checkpoint immutable partitions, use bounded retry with backoff, quarantine persistent errors and protect mutations with idempotency keys and version checks. The outbox relay offers at-least-once delivery; consumers deduplicate, rather than assuming end-to-end exactly-once network transport. Backups coordinate control state, manifests and authoritative data watermarks. On recovery rebuild compatible serving projections, reconcile IDs and counts, then reopen traffic.
+
+17 Learned matching and recommended expansion
+
+Phase 2 adds separate supervised Account and Contact models, active-learning case selection, monthly refresh evaluation and conditional retraining. New UI-selected fields enter a proposed feature set and trigger impact tests. Feature, label, training snapshot and model versions are immutable; prevent label leakage across train and holdout identities and treat steward judgments as evidence with quality review. Promotion requires precision, retrieval and cluster quality, drift, explainability, serving parity and rollback gates.
+
+CDC and event ingestion add source ordering, lateness and reconciliation after core delta correctness passes. Match-before-create needs a separate concurrent-create fence or enterprise workflow reservation; a read-only lookup alone cannot prevent two simultaneous CRM creations. Governed writeback verifies expected source revision, field authority, approval, idempotency and acknowledgments, and tags provenance to prevent echo loops.
+
+Phase 3 can evaluate multilingual embeddings, geospatial support, external channel validation and AI-assisted mapping or review. Treat untrusted source text as data; AI suggestions cannot execute tools or publish policy without validated structured review. Inferred potential, personas or enrichment are labeled and never fabricate source facts or change Customer or Prospect classification.
+
+18 Test strategy and business traceability
+
+BRD family
+
+Design coverage
+
+Acceptance evidence
+
+ING and SRC
+
+Sections 3 to 5
+
+Formats, mappings, replay, key reuse, snapshots, out-of-order updates and count reconciliation
+
+DQ MAT and CON
+
+Sections 6 and 7
+
+Country and name fixtures, candidate recall, cap-hit handling, domain holdouts and explanations
+
+ID and REL
+
+Sections 8 and 10
+
+Merge, split, bridge contradiction, stable IDs, cycles and multiple affiliations
+
+SUR and CLS
+
+Sections 9 and 10
+
+Winner lineage, coherent address, overrides and every binary classification boundary
+
+UI OPS and GOV
+
+Sections 11 to 14 and 16
+
+Optimistic cases, auth denials, generation fence, API semantics, replay, purge and recovery
+
+SCALE
+
+Section 15
+
+Full footprint, concurrent internal workload, skew, fault injection, compute cost and tail distributions
+
+ADD recommendations
+
+Section 17
+
+Pilot gates for models, CDC, creation prevention, writeback and optional advanced capabilities
+
+
+
+
+
+Classifier UAT: first-party only, third-party only, mixed, vendor-winning attributes, CRM prospect status, independent linked domains, first-party arrival, last first-party removal, split, registry correction, inactive member and empty retirement.
+
+Identity quality: independent adjudicated labels by domain, source pair, country, sparse records and difficult collisions. Measure retrieval recall, pair precision, cluster over-merge and split error, and affiliation accuracy separately.
+
+Integrity and publication: source-key and active membership uniqueness, class-count reconciliation, no dangling relationship, reproducible lineage, stable IDs, explicit redirects, release rollback and conflicting concurrent runs.
+
+Failure injection: worker loss, checkpoint duplicate, warehouse timeout, incomplete serving generation, stale policy cache, internal application outage, outbox retry, consumer lag and restore with deleted records.
+
+Scale: progressive 10M, 100M, 500M and 1.5B resident corpus; representative source mix, average and tail fan-out, giant clusters, shared switchboards, source expiry and concurrent internal application workload.
+
+19 Migration and implementation sequence
+
+Stage
+
+Implementation scope and exit gate
+
+Definition and prototype
+
+Confirm domain grains, source categories, contracts, labels and workload. Build representative adapters and compare compute or serving options.
+
+Production core
+
+Ingestion, transforms, Account and Contact resolution, ID persistence, classification, history, review, entitlement and manifest publishing. Complete functional UAT and consumer reconciliation.
+
+Scale and operations
+
+Partitioned resident keys, incremental component repair, bounded internal query paths, observability, deletion and coordinated recovery. Pass full-footprint benchmark and operating budget gates.
+
+Operational expansion
+
+Learned matching, CDC, creation prevention, channel validation and controlled writeback after specific pilot gates.
+
+Advanced extension
+
+Evaluated semantic retrieval, AI assistance, inferred analytics and additional domains after measurable quality and value evidence.
+
+
+
+
+
+Preserve reference capabilities while replacing implementation bottlenecks. Migrate the supplied 15-table SQLite metadata responsibilities to transactional control services and retain the 13-table Snowflake operational responsibilities as compatible logical objects. Add Contact, organization, Site, affiliation, permission, registry versions, classification and publication manifest structures. Account xref and golden interfaces need Contact counterparts.
+
+Keep transitional spelling aliases such as phoentic_business_name and postal suffix variants through explicit mappings until consumers migrate. Reconcile old and new entity membership, xrefs, winner provenance and policy outputs in a shadow run. Existing legacy flags do not translate one-for-one to class: derive Customer or Prospect afresh from source memberships. Remove the old category from active contracts and publish a schema migration notice.
+
+20 Open implementation decisions
+
+Approve initial source adapters, exact fields, source category owners, deletion and member-withdrawal contracts. Customer and Prospect definitions are already fixed by the user.
+
+Choose managed Spark, orchestration and serving products after measured capacity, exact retrieval completeness, licensing and monthly cost comparisons.
+
+Confirm resident Account versus Contact mix, retention, candidate distribution, source multiplicity, region and infrastructure budget; set full-load and rebuild deadlines.
+
+Ratify internal application availability and response budgets, accepted-change RPO, service RTO, review staffing, holdout quality and high-impact approval roles.
+
+Name downstream owners and acknowledgment contracts; decide which Phase 2 integrations enter the first funded delivery.
+
+21 References and evidence boundaries
+
+The primary functional baseline is the prior MDM Business Requirements document and its five supplied source references: business requirements, technical design, Snowflake operational schema, SQLite metadata schema and seed configuration. The updated Entity360 Business Requirements document is authoritative for business behavior. This design proposes deployment and algorithms; source schemas and seeded rules are inputs, not independently verified production interfaces.
+
+T1  Snowflake Constraints. Primary key, unique and foreign-key enforcement limitations inform explicit publication integrity checks. https://docs.snowflake.com/en/sql-reference/constraints  Reviewed September 30 2026.
+
+T2  Apache Spark Performance Tuning. Partition and adaptive skew handling inform the distributed execution proposal; they do not establish Entity360 throughput. https://spark.apache.org/docs/latest/sql-performance-tuning.html  Reviewed September 30 2026.
+
+T3  Microsoft Health Endpoint Monitoring pattern. Dependency monitoring and health endpoints inform the proposed operational probes. https://learn.microsoft.com/en-us/azure/architecture/patterns/health-endpoint-monitoring  Reviewed September 30 2026.
+
+22 Metadata driven configuration and application workflows
+
+The application exposes configuration tasks illustrated in S01 to S13, with screen-independent services and versioned metadata. BRD sections 20 and 21 define WF-01 to WF-13 and EX-01 to EX-07. This design specifies control-plane structures, runtime semantics and validation. Endpoint paths, schemas, authentication transport and health routes remain exclusively in the separate API Technical Design.
+
+22 1 Workflow and configuration dependency graph
+
+Authenticate and authorize the user. Define organizational attribute groups and the canonical dictionary. Register the source and validate local paths and format. Map source fields to canonical attributes using existing mapping requirements. Select golden-eligible attributes, then configure coherent survivorship groups, anchors, source selections and ordered waterfall steps. Validate the complete dependency graph, preview impact and save a draft revision. Approve and activate an immutable bundle. Run ingestion and mastering using that bundle, publish a consistent release, then expose batch history and golden-record exploration.
+
+Source-mapping and matching-rule detail screens are not present. Their contracts derive from existing requirements; no extra fields are inferred from their menu entries. S13 supplies blocking bucket configuration. Dictionary organizational groups and coherent survivorship groups have separate identifiers and relationships.
+
+22 2 Control metadata and invariants
+
+Logical object
+
+Minimum fields
+
+Validation
+
+canonical_group
+
+Domain, code, title, description, order, enabled, revision
+
+Unique code per domain; reference-aware retirement; counts derive from dictionary membership.
+
+canonical_attribute
+
+Domain/code, title, dictionary group, incoming/storage types, repeating, relevance, importance, enabled, expression reference
+
+Validated types and expression references; mandatory technical fields cannot be disabled. Importance is metadata, not automatic identity proof.
+
+source_configuration
+
+Code, source category, owner, business category, description, active, file pattern, header rows, input format, directory revision
+
+Source category requires impact preview. Paths stay under global base; patterns and claims must not overlap across sources.
+
+golden_attribute_selection
+
+Domain, eligible business attribute set, required-field set, revision
+
+Atomic update; eligibility closure over active group references; system fields remain mandatory.
+
+survivorship_group
+
+Domain, group ID/name, anchor attribute, member set, source selections and priorities, revision
+
+One active group per business attribute per domain; anchor belongs to group; each referenced field is golden-eligible.
+
+waterfall_step
+
+Group, sequence, type, attribute/parameters, recency field or frequency key
+
+Unique sequence; approved typed parameters; no missing field references; deterministic replay.
+
+policy_release
+
+Revision, dependency manifest, actor, approval, effective time, previous revision
+
+Immutable activation; optimistic concurrency; every job pins release ID; rollback requires correction processing.
+
+
+
+These extend the existing registry, policy-bundle and review objects; they are logical responsibilities rather than a newly mandated database product. UI selection counts, active counts and display order are projections of these objects, not duplicated editable values. Database schema migration and indexes shall preserve transactional referential integrity at the control layer.
+
+22 3 Source and attribute configuration behavior
+
+Source creation validates a unique source code, approved FIRST_PARTY or THIRD_PARTY category, owner and category references, restricted file pattern and nonnegative header-row count. Input directory maps to incoming; processing and reject directories remain required beneath the global base. A screenshot archive field is a candidate optional archive_directory, not a replacement for processing_directory or an initial required fourth directory. Activation is blocked until configured format, header interpretation and path access are consistent. Format details such as encoding, delimiter and header-to-column interpretation are adapter configuration, not deductions from the displayed default of one header row.
+
+A source active flag controls new delivery claims. Existing accepted members remain in the mastering corpus unless an explicit deletion, withdrawal or eligibility policy says otherwise; source deactivation is not ROW_STATUS=DELETED. If member withdrawal is approved, perform preview, classification impact and cluster repair as a separate governed action. Changing First Party or Third Party requires reclassification from retained membership and publication corrections; selecting a vendor as a survivorship winner does not determine Customer classification.
+
+Dictionary incoming/storage types drive explicit conversions and quarantine invalid values. Repeating attributes require typed collections and element identity; they do not create new source identities through uncontrolled row expansion. Expression fields use the existing restricted expression evaluator with dependency-cycle checks. Source event creation/update timestamps are retained separately from ROW_CREATE_TIMESTAMP and ROW_UPDATE_TIMESTAMP. Adapter deletion signals map to ROW_STATUS before indexing; unknown status is never silently active.
+
+The screenshot field Matchrome is interpreted only as a visible importance category. Values such as deterministic, strong and supporting require an approved policy vocabulary. Record-created and updated timestamps are processing or recency metadata, not sufficient person/account identity evidence. Source ID equality is scoped to source and entity type; a parent or ultimate-parent ID normally informs hierarchy rather than proving that two sites or accounts are identical. Explicit approved matching predicates govern any exceptions.
+
+22 4 Same row survivorship and proposed waterfall semantics
+
+For a published cluster and coherent group, build candidate source-record versions from current accepted membership. Apply DELETED exclusion before every step, as well as source rights, validity and field eligibility. A missing golden field cannot reappear from purged historical evidence. Apply the confirmed source-selection interpretation; until confirmed, hard exclusion versus priority preference must remain a release decision. The group anchor must be a member and golden-eligible before any policy can save.
+
+Proposed evaluation semantics for review: iterate waterfall steps in configured order, retaining the best candidate subset at each step. Non-Null keeps rows with a usable anchor or explicitly configured required fields. Source Priority retains the best configured source rank. Most Frequent keeps rows with the modal configured normalized value, counting at most one vote per scoped logical source identity. Most Recent retains the greatest valid configured source-business timestamp, not ingestion time. Ties pass to the next step, followed by the approved stable source/record/version key. Empty candidates yield a null group with an explanation or a configured review case; they never trigger undocumented component mixing.
+
+The screenshot title Within-Source Waterfall Steps and the presence of Source Priority leave cross-source evaluation order ambiguous. The preceding all-candidate ordered filtering is a proposed design, not a confirmed interpretation. A within-source-first alternative must specify how source winners are compared and how each step changes scope. Store this choice in the policy release and test with competing examples before activation. Most Frequent normalization and null-anchor eligibility likewise require approval.
+
+After selecting the winning row, copy all group members from exactly that row, preserving its nulls and typed values. Store winning source identity/version, group and policy revision, step sequence, candidate counts and reason codes for authorized explainability. Independent groups may select other rows. Keep minimal technical audit after deletion; purge winner payloads and source-only values from history, caches and exported projections under the established DEL contract.
+
+22 5 Saving configuration and incremental processing
+
+Save group name, anchor, members, source order and waterfall as one transaction using an expected revision. Validate uniqueness, source eligibility settings, referenced fields, parameter types, duplicate priorities, expressions and mandatory fields. The browser treats unsaved edits as local state; a successful save returns the authoritative revision. Approve and activate using the existing immutable policy-bundle mechanism rather than modifying live metadata in place. Directory and policy revisions are independently pinned by each delivery and run.
+
+A source mapping change schedules remapping of affected source versions; a golden eligibility change invalidates related projections; a survivorship change schedules group re-evaluation for affected clusters. A matching or blocking policy change may require wider candidate regeneration or graph rebuild. Preview estimates impact and selects a bounded backfill or governed full rebuild. Concurrent batches continue under their starting bundle and publish only internally consistent releases.
+
+For ordinary deltas, normalize changed nondeleted rows, generate keys and retrieve candidates against both same-run changes and the resident nondeleted candidate index. Reuse accepted match evidence and membership outside the proven affected neighborhood; do not compare only the incoming file or simply reuse a stale golden row. Re-evaluate changed pairs, repair components, rerun impacted survivorship groups and classification, and publish corrected masters and downstream deltas. Deleted members remove all historical and current operational evidence and may split components. If a repair cannot be safely bounded, defer it or perform the existing shadow-rebuild fallback.
+
+22 6 Dashboard batches and golden record queries
+
+Projection
+
+Counting and consistency contract
+
+Golden record count
+
+Current nonretired entities per authorized domain and publication. Selected sample rows and dashboard totals use the same scope.
+
+Active sources
+
+Enabled registry sources in authorized scope; this is separate from accepted contributing source-member count.
+
+Open reviews
+
+Actionable review states in the user scope; states and window are approved, not inferred from the screenshot zero.
+
+Recent batches
+
+Run IDs, timing, status, input/cluster/golden counts and messages. Stage meaning and publication are explicit; null counters display unavailable.
+
+Golden list and export
+
+Bounded indexed search, deterministic sorting with entity-ID tie-break, server-side paging and scoped column selection. Export is pinned to a publication and obeys field permissions.
+
+
+
+Count units distinguish input rows, accepted logical source identities, affected clusters, current goldens and changed golden versions. A batch with zero newly published goldens can still have a nonzero current golden inventory; counters shall not silently conflate these meanings. Define mutually exclusive terminal dispositions for accepted, rejected, unchanged, deleted and deferred source processing, plus separate stage transition counters. Refresh metadata accompanies operational projections.
+
+At the 1.5B target, use precomputed authorized aggregates and bounded serving projections rather than a full synchronous corpus scan for each dashboard refresh. Search by name, address and domain is an internal application function in the initial rollout. Use parameterized queries, allowed field/sort lists, stable cursors and pinned publications to avoid duplicates or gaps across pages. Selected UI columns never broaden authorization. Open entity detail exposes only permitted members and evidence. Long exports are controlled background jobs with audit and expiry, not unbounded browser queries.
+
+22 7 Security and internal service boundaries
+
+Authentication mechanism remains a deployment decision; the credential-form screenshot does not establish production password storage or MFA policy. Services authorize every operation independently of navigation. Configuration editing, activation, batch operations, stewardship, role grants, data exploration, exports and file inspection are separate capabilities. User/role screens must not permit privilege escalation. Existing enterprise identity and service-identity recommendations remain subject to the approved deployment.
+
+File and CSV inspection resolves only authorized source locations under the global base, rejects traversal and symlink escape, and bounds bytes and rows. It cannot serve arbitrary host paths or deleted payloads. Golden source strings are output-escaped as text; HTML visible in sample company names never executes. Export values receive spreadsheet formula neutralization. Audit stores technical actor/revision/action evidence rather than raw deleted source attributes.
+
+Internal integration supplies configuration reads and mutations, validation and previews, draft activation, batch projections, golden list/detail/export, survivorship explanation and governed file preview. Their endpoint specifications remain in the API Technical Design. This update does not introduce external consumer APIs or ADLS into the initial rollout.
+
+22 8 Validation and outstanding design decisions
+
+Validate with counterexamples: one grouped row wins even when a secondary attribute is null; conflicting priorities and equal timestamps yield a deterministic result; a deleted prior winner cannot return through history; source deactivation pauses ingestion without deleting membership; missing technical status is quarantined; a schema/selection edit invalidates dependent groups; a stale save revision conflicts; a run retains its policy; a deleted bridge causes split and reclassification; dashboard counters reconcile; paging/export agree with one publication; HTML and formula-like source values do not execute.
+
+Approve the waterfall scope and order, source-selection filter semantics, Most Frequent voting key/normalization, null-anchor behavior, recency/tie-break policy, archive retention, source-withdrawal action and authentication/role matrix before production. Screenshot counts, provider order, selected columns and matching-importance labels are examples rather than verified policy. WF traceability: configuration objects cover WF-03 to WF-10; projections cover WF-02, WF-11 and WF-13; authorization and file boundaries cover WF-01 and WF-12.
+
+23 Materialized expressions and blocking dependencies
+
+Derived attributes execute within ingestion: parse and type source values, map them to canonical fields, apply prerequisite normalization, detect deletion, calculate the derived dependency graph, store typed results, materialize approved bucket keys, then load the accepted evidence and index postings. No record enters matching using a required derived value that has not completed successfully. For a DELETED identity, route directly to the purge workflow; calculating new matching evidence from its deleted payload is prohibited.
+
+23 1 Expression definitions and ingestion execution
+
+Extend canonical_attribute with derivation_kind, expression_definition, expression_language_version, output/storage types, null policy, error policy, enabled and match relevance. Maintain an expression_release with immutable expression hash, function-set version, ordered dependency references and approval. Persist derived results on the corresponding canonical source-record version, with expression_release_id, dependency fingerprint, evaluation status and safe error code. Candidate postings and golden projections carry compatible release references. Storing only an expression string without the materialized source value does not meet EX-02.
+
+Validate definitions before save and activation: parse syntax, resolve names against the domain dictionary, type-check operators and function calls, detect cycles and topologically order derived dependencies. Missing fields or disallowed references fail validation. Preview uses the same evaluator and normalization version as ingestion. Stable run context supplies any approved business date/time input; arbitrary current time or random values cannot make retries nondeterministic. Keep source identifiers and technical timestamps separate from input values used by domain formulas.
+
+The area-code screenshot uses Jinja-like field interpolation, assignment, string conversion, replacement and slicing. Proposed implementation: parse an approved subset into a typed expression representation and compile supported operations into the distributed execution engine. Compatibility syntax may expose {{ field_name }} and permitted assignment constructs, but not general object access, imports, arbitrary Python/SQL, file/network calls or dynamic code execution. Unsupported functions must be rejected or handled by an explicitly bounded executor; they cannot fall back to unrestricted eval. Do not evaluate the 1.5B corpus on one driver.
+
+Expression results remain typed Boolean, string, numeric, date/time or declared collection values. Avoid converting a Boolean to nonempty text and then treating any string as true. False is a valid computed value; null means unknown unless an approved policy says otherwise. Store evaluation failure separately from null. Required derivation errors quarantine the dependent record or processing path; optional nullable results use an approved, visible policy. Stage counts capture evaluated, failed and skipped derivations separately from logical-row ingestion dispositions.
+
+23 2 User defined derived attributes
+
+Derived value
+
+Dependencies and approved use
+
+Example Is Educational Institution
+
+Optional user-defined name, type and expression over configured fields; no built-in education policy. Persist typed values during ingestion for configured blocking, matching, survivorship and downstream selection.
+
+Examples Is School / Is University
+
+Optional user-defined expressions and relationships. These example names do not define platform taxonomy, identity or mandatory fields; preserve configured null and false semantics.
+
+area_code
+
+Approved canonical phone normalization and country context. The displayed expression is a US-like string example; it is not a universal international phone parser.
+
+Business-name / phonetic keys
+
+Declared normalized name inputs and approved normalization/phonetic function versions. Persist before constructing dependent blocking keys.
+
+Street number / ZIP key
+
+Approved parsed address components and null policy. Retain component lineage; a derived address key survives from the same winning source row as the address group.
+
+
+
+Source-level derived values may be grouped with base attributes for same-row survivorship, as S12 illustrates for MailingAddress. Copy the winning row's stored flags and keys together with its address values. Do not recompute a grouped flag from independently won golden attributes and call it that row's value. A distinct golden-level aggregate or cross-group derivation, if later approved, requires a separate definition and execution stage; it does not substitute for ingestion-time materialization.
+
+23 3 Configurable blocking bucket evaluation
+
+Represent each bucket with domain, stable code, display name, description, priority/order, active state, definition mode (fields or expression), component fields or key expression, optional eligibility predicate, dependency release and approved bounds. Validate referenced base and derived attributes. Active buckets execute in configured order and preserve provenance when one pair arises through several buckets. Equal priority is either rejected or resolved by an approved stable bucket-code order.
+
+For field-mode keys, serialize typed components using an unambiguous tuple encoding with explicit separators/lengths and null handling. For expression mode, evaluate the approved expression over stored canonical and derived values using the same restricted evaluator, then materialize the key before indexing. Store canonical key representation and hash with bucket/release identity; verify representation on hash collisions. Normalize only as declared by that key version. Suppress all-empty, invalid and failed keys instead of grouping missing values into a giant block.
+
+Education flags can participate in approved predicates or keys, consistent with the user requirement. A key consisting only of true/false would form very large low-information partitions; require discriminating name/address/domain/other approved components or use the flag to restrict a stronger bucket. Bucket generation retrieves candidates, not automatic merges. Large blocks obey existing split, secondary retrieval, budget and deferral controls, with resolution completeness visible.
+
+S13 illustrates normalized-domain fallback to a phonetic business-name slice plus ZIP, an address/name expression, phonetic-name/ZIP and a field tuple of phone/ZIP. Preview compares configured label, description and expression behavior. Resolve the visible street-name slice/label mismatch rather than silently implementing one. These sample bucket codes and slice lengths are not mandatory production rules; approved tests define behavior.
+
+23 4 Recalculation and downstream consistency
+
+Maintain a dependency graph from source mappings and normalized fields to expressions, buckets, match features, coherent groups and serving projections. A row update recalculates impacted derived chains and removes old postings before inserting the new compatible version. A policy edit produces a new immutable expression/bucket release and schedules affected resident-data backfill; an unchanged raw-payload hash cannot skip re-evaluation when a dependency release changed.
+
+A run pins mapping, normalization, expression, bucket, matching and survivorship revisions. Reuse a stored derived result only when its source version, dependency fingerprint and expression release match. Build a consistent candidate index for the target release, or use explicitly compatible dual indexes during a governed transition. Do not mix new delta key semantics with stale resident postings. After recalculation, repair affected edges/clusters, rerun survivorship and classification, and publish a consistent corrected release.
+
+Downstream consumers receive selected typed derived values already stored in approved canonical/golden projections, with entity/source lineage and applicable expression revision. They do not invoke formulas to obtain normal values. Business-field selection and permissions govern distribution; internal views and dataset delivery are initial capabilities, while external APIs remain deferred. Golden selection does not remove stored source-level derivations needed for matching. Deleted source identities purge derived results, expression input snapshots, postings, caches and historical source-only outputs under DEL.
+
+23 5 Validation and business decisions
+
+Verify dependency-chain ordering, cycles, missing fields, null/false semantics, malformed Boolean output, unsafe expression calls, repeatability and preview/runtime equivalence. Test each approved education formula against labeled examples; test phone country formats and invalid values. Verify stored values precede blocking; false flags do not collapse into empty values; eligibility predicates cannot turn an incomplete match into a proven new Prospect. Test key tuple collisions, common Boolean blocks, duplicate pair origins, deleted evidence, policy edits with unchanged source payloads, resident backfill and release-pinned downstream exports.
+
+Platform decisions cover supported expression syntax/functions, country-aware phone semantics, per-field null/error policy, blocking eligibility and bounds, and activation/backfill policy. The screenshots establish configurable expression and bucket workflows; they do not establish formula accuracy, production execution safety or scale benchmarks. EX-01/02/03 map to sections 23 1 and 23 2; EX-04 to 23 2 and same-row survivorship; EX-05/07 to 23 3; EX-06 to 23 4.
+
+
+
+
+24 Configurable matching rule execution
+
+BRD MR-01 to MR-05 define user-configurable matching clauses. This design extends the existing versioned rule engine and immutable policy bundle. It specifies the configuration model and pair evaluator; endpoint paths, transport schemas and authentication remain in the separate API Technical Design. Screenshots S14 to S17 and the user clause text establish the requested authoring controls, but they do not establish deployed behavior or approve the example profiles for production.
+
+24 1 Rule metadata and compilation
+
+Logical object
+
+Required configuration
+
+matching_profile
+
+Profile ID, environment, entity domain, draft revision, effective release, approval, preprocessing release, missing-value policy and aggregate scoring settings.
+
+matching_rule
+
+Stable rule key and title, enabled state, grouped Boolean expression, evaluation order, action or evidence class and hard-gate references.
+
+matching_condition
+
+Condition ID; left side and attribute; right operand kind attribute or typed literal; right side and field or value; operator; algorithm and tokenizer references; normalized threshold; direction mode; enabled state.
+
+algorithm_and_tokenizer
+
+Versioned algorithm definition and compatible types; tokenizer mode, n-gram length where applicable, normalization, boundaries, padding, multiplicity and vectorization semantics.
+
+rule_evaluation
+
+Pair identities and source versions, profile release, candidate origins, safe condition outcomes and scores, satisfied clause IDs, decision type and execution state.
+
+
+
+Extend the existing mdm_matching_config and mdm_match_rule_condition responsibilities rather than introducing an unrelated configuration store. Compile approved metadata to a typed expression tree with explicit AND and OR groups. Validate field references, operand types, algorithm/tokenizer compatibility, operator arity, score range, direction semantics and cycles before activation. IS NULL is unary and has no comparator score, tokenizer, threshold or right operand. A disabled child is omitted under explicit activation rules; reject any resulting empty condition group so that disabling all conditions cannot create a universal match.
+
+Resolve configured source fields through approved source-to-canonical mapping. The supplied site_address_1, ml_company_name, site_city, site_phone_full_number, site_zip5 and business_name are examples, not a fixed matching field list. The user corrected zite_zip5 to site_zip5. Each saved condition declares operand types, record sides, attribute versus literal and, for IS NULL, the single tested operand. first_party_data is an illustrative user-configured attribute; infer neither its type nor its comparison target from its name. Activation validates the configuration actually entered by the user.
+
+24 2 Score and tokenizer contract
+
+Store thresholds as bounded decimal values on [0, 1], preserving the supplied comparator: > 60% becomes GT 0.60, > 70% becomes GT 0.70, > 15% becomes GT 0.15, > 40% becomes GT 0.40 and > 50% becomes GT 0.50; = 100% becomes SCORE_EQ 1.00. SCORE_EQ is separate from raw attribute EQ. Compare the full computed score, not a rounded display value. Numerical handling at 1.0 must be defined and tested by algorithm version; do not silently add an epsilon that converts a near match into the requested equality.
+
+Proposed implementation: compile cosine and Jaccard conditions to approved distributed pair functions. Cosine requires a declared vectorization and weighting policy; Jaccard requires declared token-set semantics. Default is a named, versioned tokenizer configuration rather than an implicit library default. Bigram and trigram policies declare whether units are characters or words and how boundaries, Unicode, punctuation, case, duplicate tokens and short strings are handled. The requested names alone do not supply these definitions. Record the complete algorithm/tokenizer/preprocessing version in the release; training or reference statistics, if used for vectorization, must be pinned as well.
+
+Null operands produce UNKNOWN for similarity predicates under the proposed conservative policy, even when both operands are null. Empty strings and empty token collections cannot qualify as full similarity; their approved empty-value policy is separate. IS NULL tests the selected source operand before similarity and remains distinct from blank text. An evaluation error is an operational error, not UNKNOWN, zero similarity or NO_MATCH. Required computation failure prevents a complete processing outcome. Activation must confirm missing-value and error semantics.
+
+24 3 Boolean grouping direction and decisions
+
+The user confirmed OR between numbered clauses in the supplied examples: C1 OR C2 OR C3 and, for the test example, C1 OR C2 OR C3 OR C4. This is illustrative configuration data, not fixed engine logic. Users select connectors and nesting both between and within clauses; the compiler supports explicit AND and OR groups without ambiguous row precedence. Under proposed three-state logic, an AND group is FALSE if any child is FALSE and TRUE only if all are TRUE; an OR group is TRUE if any child is TRUE and FALSE only if all are FALSE. Other cases are UNKNOWN. Only TRUE yields satisfied matching-rule evidence.
+
+Fixed direction evaluates the saved left/right assignments. If an approved rule permits either orientation, evaluate the original and swapped complete expression trees and combine their outcomes under the declared direction policy. Never swap only selected predicates or assume a null phone check applies to both records. Stable unordered pair IDs prevent duplicate evidence when both orientations pass. Direction choices beyond the visible Fixed control are proposed capabilities requiring approved definitions.
+
+A passing clause adds rule evidence to the existing match-decision pipeline. Contradiction gates, entity grain and cluster constraints remain authoritative. The relationship of rule evidence to weighted scoring, deterministic decisions and review thresholds is part of the policy release; the UI does not imply every passing clause must force an automatic merge. Customer or Prospect classification continues to depend on current first-party or third-party membership. An education flag or first_party_data comparison does not replace that classification rule.
+
+24 4 Supplied profile changes and unresolved operands
+
+Clause
+
+First set
+
+Test Env
+
+1
+
+Address > 60%; ML name > 60%; city score = 100%.
+
+Address > 70%; ML name > 70%; city score = 100%.
+
+2
+
+Phone score = 100%; ZIP score = 100%.
+
+Same phone and ZIP checks plus address > 15%.
+
+3
+
+Address > 70%; business name > 40%; ZIP score = 100%.
+
+Unchanged.
+
+4
+
+Absent.
+
+Phone IS NULL; first_party_data score = 100%; address score = 100%; site_zip5 score = 100%; ML name > 50% using Jaccard and bigram.
+
+
+
+The illustrative per-condition algorithm and tokenizer matrix is in BRD section 22 2. Clause 1 name conditions use Jaccard with trigram and Clause 4 uses Jaccard with bigram; other scored example conditions use cosine with Default. Each of these choices, including threshold and field, is user-configurable. The screenshots’ 0.8 values and token-set operator are separate examples. Clause 4 is not a platform-defined rule: users select the null operand, first_party_data type and comparison operands. No supplied clause is installed as a built-in recipe.
+
+24 5 Scoring controls and activation workflow
+
+Configure global match/review thresholds, deterministic rules, feature weights and business-name algorithm toggles independently of per-condition similarity settings. The screenshot shows a weight-sum target of 1.000; a normalized weighted profile validates nonnegative weights and sum 1 within an explicitly declared tolerance. Its missing-feature normalization and zero-total behavior must be configured. Business-name options shown are Levenshtein, Token Sort, Partial Ratio and No Space, with maximum-over-enabled-methods as an illustrated aggregation. Persist the actual method versions and aggregation choice. Require at least one enabled method when that composite score is referenced. Do not replace a selected cosine or Jaccard condition with this composite score.
+
+Use optimistic revision checking and atomic draft saves. Compile and preview on authorized representative candidate pairs; show condition outcomes, full scores, tokenization diagnostics where permitted, clause outcomes and projected merge/review/split changes. Promotion names the destination environment and creates an approved immutable profile release. Keep test and target profiles isolated; the first supplied set has no confirmed production designation. A running batch retains its pinned release. Rollback schedules correction under the established publication and replay model.
+
+At runtime, use accepted current nondeleted records, materialized ingestion-derived values and resident plus same-run candidate indexes. Evaluate compiled conditions in the distributed processing engine, with safe common-subexpression reuse keyed by attribute and algorithm/tokenizer release. Do not collect the corpus on the driver. Similarity functions evaluate candidate pairs after blocking; adding a match clause does not by itself expand candidate recall. Rule changes require affected pair re-evaluation, including unchanged resident source rows, and may remove old edges or split clusters. If safe impact bounds are unavailable, use the existing governed rebuild fallback. Recompute affected survivors, classification and downstream publications consistently. Deletion purges old derived and match evidence before repair.
+
+24 6 Validation and decision traceability
+
+MR-01 maps to typed metadata and compilation; MR-02 to score/tokenizer contracts; MR-03 to profiles and release processing; MR-04 to score controls; MR-05 to pair explanation and gates. Test exact boundary scores at 0.15, 0.40, 0.50, 0.60, 0.70 and 1.00, including display rounding; AND/OR grouping; inactive and empty groups; null versus blank; incompatible literals and unsupported tokenizers; duplicate orientations; and deleted evidence. Verify the Test Env Clause 2 address condition changes outcomes when only phone and ZIP agree. Preview and runtime must produce identical results for the same input pair and release.
+
+Test config save conflicts, pinned running batches, test-to-target promotion, rollback correction, resident backfill and rule edits that remove a bridge and split a cluster. Profile metrics shall distinguish blocked candidates, evaluated pairs, satisfied clauses, review outcomes, rejected contradictions and operational failures. No screenshot establishes calibrated probabilities or production-scale performance. User configuration supplies grouping, environment, null operands, direction and field mappings. Remaining platform contracts cover tokenizer/vectorization definitions, numerical equality policy and rule-to-decision precedence. OR between clauses is confirmed for the illustrated example only.
+
+
+
+
+25 Metadata driven source matching and constrained clustering
+
+BRD SP-01 to SP-05 extend the matching engine and cluster validator with user-configured source-pair policies and cluster cardinality constraints. Names such as MDR, DNB and Salesforce, and attributes such as school name, address or education flags, are illustrative metadata values. No business formula, source-specific exception, attribute threshold or source membership cap is embedded in engine code. The same configuration model applies to any registered source and supported canonical or derived attribute.
+
+25 1 Generic derived attribute configuration
+
+Resolve derived attributes through canonical attribute IDs, declared types, dependency references and immutable expression releases. The evaluator must not branch on display names such as Is School or Is University. Users define arbitrary supported attributes, expressions and optional relationships; there is no platform-provided education taxonomy or required education formula. Expressions execute during ingestion before candidate generation and their stored values are reused for matching, blocking, survivorship and downstream projections. Rule editors enumerate permitted configured fields rather than a fixed education-field list. Existing expression validation and controlled activation remain applicable.
+
+25 2 Source policy metadata
+
+Logical object
+
+Configuration and invariant
+
+source_pair_policy
+
+Policy key, domain, left/right source IDs or governed source-group selectors, direction, priority, mandatory gate tree, qualifying clause tree, action and immutable release. No source names embedded in evaluators.
+
+pair_attribute_condition
+
+Left/right configured field IDs or typed literal, preprocessing release, exact or similarity comparator, algorithm/tokenizer release, threshold, null policy and active state. Different fields may use different thresholds.
+
+cluster_membership_constraint
+
+Constraint key, domain, target source selector, optional source-presence predicate over prospective membership, maximum distinct logical records, enabled state, severity fixed to hard for a hard-limit rule and release.
+
+cluster_source_count
+
+Cluster and publication revision, source ID, count of distinct accepted current logical members. Derived from membership, never edited independently.
+
+constraint_decision
+
+Constraint/release ID, candidate union or proposed membership, target source, observed count and limit, safe conflicting identity references, outcome and reason. Purge deleted payloads under DEL.
+
+
+
+These logical objects extend the existing policy, condition, cannot-link, membership and audit responsibilities. Their physical schema is an implementation design decision. Resolve source selectors to stable registry IDs and field references to the canonical dictionary. Validate domains, operand types, selector overlap, nonnegative integral limits and condition dependencies. A missing cap means no business cap for that source. A configured maximum zero is an explicit exclusion and must be shown as such in preview. Business cardinality limits are separate from processing budgets for large clusters.
+
+25 3 Effective pair policy and exact conditions
+
+Resolve the effective source-pair policy from the pinned release before evaluating pair evidence. Preserve direction where required; symmetric policies apply in both orientations. Proposed precedence is explicitly ranked specificity and configured priority, with ambiguous equally ranked policies rejected at activation. The resolved policy consists of mandatory gates and qualifying clauses. Evaluate applicable mandatory gates across every match path; only then evaluate the configured qualifying Boolean expression or score route. A general fuzzy rule, exact-identifier route, another OR branch or model score cannot override a mandatory source-specific gate. Any approved exception must be explicit policy metadata.
+
+For the illustrative MDR-versus-MDR policy, configure name and address exact comparison gates by field ID. Exact equality operates on the selected raw or normalized canonical representation and its preprocessing release; the user must choose the representation. It is distinct from SCORE_EQ 1.0 for cosine or Jaccard, because a full similarity score need not imply equal strings. For MDR-versus-DNB or MDR-versus-Salesforce, configure fuzzy algorithms, tokenizers and individual field thresholds in separate policies. No fuzzy percentages were supplied for these source pairs; none are assumed. Unsupported or missing policies produce visible unresolved cases, not implicit matching permission.
+
+25 4 Prospective cluster validation
+
+Pair compatibility and cluster admission are separate decisions. For each proposed union of clusters A and B, build the prospective distinct current membership A union B, including same-run accepted additions. Evaluate every applicable constraint against that prospective membership, not just the joining pair. For a configured source S, count distinct namespaced logical source identities in the target entity domain. Source versions and repeated deliveries of the same identity do not count as additional members. The conditional source-presence predicate is evaluated on the complete proposed cluster; when it holds, count(S) must be at most the configured maximum.
+
+If the MDR cap is one, union of a cluster containing MDR-A with any cluster containing MDR-C fails when A and C are different current source IDs. This remains true when the joining edge is DNB-to-Salesforce or when a long path contains no direct MDR-to-MDR edge. Even an exact MDR-A/MDR-C pair can produce compatible pair evidence but cannot be accepted into one cluster under the cap. A violating proposal receives a hard constraint outcome and cannot publish. Review may resolve ambiguous identity evidence, but it cannot waive a hard cap through a normal membership override.
+
+Proposed algorithm: maintain source-count summaries and supporting member identities with each proposed component, process candidate union proposals under a deterministic approved ordering, evaluate the complete constraint set before each union and retain accepted/rejected decisions. A single constrained union step is insufficient if partition processing later combines components; validate all cross-partition and final component unions as well. A deterministic ordering is reproducibility policy, not proof of globally optimal clustering. If several admissible allocations compete, route or resolve them under the declared conflict policy and show the evidence; do not silently choose an arbitrary winner.
+
+25 5 Incremental repair concurrency and publication
+
+Incremental additions reuse resident accepted evidence while re-evaluating affected pair policies and prospective cluster constraints. Serialize overlapping membership repairs with the existing component leases and expected membership revisions. Recheck counts against the latest accepted membership before commit; a stale count snapshot cannot authorize a second constrained-source member. Store count summaries with the same membership revision or recompute them during validation. The publication gate independently reconciles source counts and verifies every hard constraint on final memberships; no violating cluster is activated.
+
+An approved policy change schedules impacted resident pair re-evaluation and cluster repair. A tightened cap may require split proposals; a loosened cap permits re-evaluation but does not automatically authorize a merge. Existing members may not be dropped merely to satisfy a count: preserve valid records as separate entities or hold the affected publication under an approved transition plan. Keep running batches pinned to their starting bundle while defining how the new release cuts over. If repair scope cannot be safely bounded, use a governed shadow rebuild. Recompute persistent IDs, survivor values, classification and downstream deltas through the existing identity policy.
+
+Deletion excludes the source identity immediately, purges all historical evidence and derived values, then repairs the cluster and recalculates source counts. An accepted update to the same logical source identity replaces its active version without adding another member. Reinstatement or source-category changes remain subject to deletion watermarks, registry policy and revalidation. User configuration can add limits for a new source without deploying new matching or clustering code.
+
+25 6 Configuration workflow and validation
+
+Provide source-pair policy and cluster-constraint editors alongside the matching configuration workspace. The pair editor selects source selectors, attribute operands, exact/fuzzy comparators and mandatory versus qualifying groups. The constraint editor selects entity domain, trigger/source-presence condition, target source and maximum. Preview resolves the effective pair policy, shows per-condition evidence and computes prospective per-source counts. Explain a rejected merge with the configured source, count, maximum and rule revision. Validate conflicts and existing violations before controlled activation; keep draft saves, previews and operational calls within the internal service boundary.
+
+Tests shall cover one constrained-source member with allowed fuzzy cross-source members; two constrained-source members with identical values; indirect bridges through multiple unconstrained sources; source-pair orientation; different field thresholds; mandatory gates versus general OR rules; replay and version updates; deletion; parallel attempts to add a second member; cross-partition unions; cap changes and backfills; and new configured sources/derived fields without code changes. Compare incremental and full-rebuild constraint outcomes under the same release. SP-01/02 map to source-pair policies and gates; SP-03/04 to prospective membership validation; SP-05 to release transitions, explanations and publication checks.
+
+Entity360 Technical Design  |
