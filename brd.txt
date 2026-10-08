@@ -1,0 +1,2103 @@
+Entity360 Business Requirements
+
+Account and Contact Master Data Management
+
+Version 4.2  |  October 2 2026  |  DRAFT for review
+
+The solution will master Accounts and Contacts across first-party and third-party sources, publish explainable golden records, and classify each Account and Contact cluster as Customer or Prospect using source membership. It must operate against up to 1.5 billion resident source records while preserving identity, history, business relationships, and governed access.
+
+The recommended approach combines configurable rules, machine learning, human stewardship, and distributed incremental processing. Account identity, site identity, commercial account identity, and person identity must remain distinct. Matching a person does not prove employment, and discovering a prospect does not establish permission to contact them.
+
+1 Purpose and scope
+
+This document defines the consolidated business requirements and measurable acceptance conditions for product planning, architecture, implementation, and user acceptance testing. Business sponsors, Sales Operations, Marketing, Account Services, data stewards, Data Engineering, security, and platform operations are the intended stakeholders. TAMR is the capability benchmark, rather than a mandated algorithm or a claim of feature or performance parity.
+
+In scope are source onboarding, quality and standardization, deduplication, Account and Contact resolution, hierarchy and affiliation management, survivorship, enrichment, Customer and Prospect classification, stewardship, configuration, publishing, auditing, and enterprise operations. Transactional sales, service, and engagement data can supply governed activity and prioritization signals; the platform does not become the transaction system of record.
+
+Out of scope are replacing CRM or ERP workflows, autonomous sales outreach, purchasing third-party datasets without approval, a full marketing campaign engine, and revenue recognition or financial consolidation. Consumer household mastering, products, and anonymous device identity are optional future domains. API-based source writeback and near-real-time ingestion are recommended additions and require explicit implementation scope and acceptance gates.
+
+1 1 Confirmed initial rollout
+
+Initial source data resides on local disk. An administrator configures the base directory globally; each source has incoming, processing and reject directories beneath it. Internal application calls are included. External-system APIs for search, matching, enrichment or Customer and Prospect lookup are deferred. Azure ADLS integration is outside the initial rollout. Endpoint specifications belong in the separate API Technical Design document.
+
+ROW_CREATE_TIMESTAMP, ROW_UPDATE_TIMESTAMP and ROW_STATUS are required standard record columns. A DELETED source identity contributes no information to matching, survivorship or classification, including historical evidence. Remove its old records and derived artifacts, then reprocess the affected cluster. The 1.5B requirement remains a scale target requiring full-footprint validation; local-disk landing does not imply a single-disk resident corpus.
+
+1 2 Requirement classification
+
+Baseline requirements describe the retained business scope. Extensions reflect additions for Entity360. Recommendations are proposed design choices requiring review.
+
+Priorities: P0 is initial rollout scope; P1 is a later release or separately approved scope; P2 is optional. Explicit rollout exclusions take precedence over priority labels.
+
+
+
+Priorities express dependency and risk, not confirmed funding or delivery dates. Acceptance criteria below are proposed release gates. Targets inherited from the references are retained as planning targets and must be ratified against an approved workload and infrastructure budget.
+
+2 Business outcomes and domain definitions
+
+Outcome
+
+Required business result
+
+Trusted identity
+
+Stable Account and Contact IDs reconcile source identities without merging distinct organizations, sites, or people.
+
+Operational quality
+
+Lower duplicate creation, measurable match accuracy, fewer manual corrections, and defensible source attribution.
+
+Account coverage
+
+Classify Account and Site clusters as Customers or Prospects; preserve corporate families and channel ownership.
+
+Contact coverage
+
+Identify existing and missing buyer roles, valid contact channels, and current affiliations.
+
+Scale and reliability
+
+Process incremental changes against 1.5B resident records with restartability, controlled costs, and auditable deletion.
+
+Consumer adoption
+
+Publish consistent current and historical views through governed APIs, warehouse datasets, and bulk exports.
+
+
+
+2 1 Entity boundaries
+
+Entity
+
+Identity grain and relationships
+
+Organization
+
+A real legal or operating organization. Names, identifiers, and business characteristics are attached at the appropriate grain.
+
+Account
+
+A commercial relationship or source account such as SBA Master, bill-to, CRM account, or channel account. Several can relate to one organization without being collapsed.
+
+Site
+
+A physical business establishment with its own identity. Multiple businesses can occupy one address, and one business can occupy multiple suites or sites.
+
+Contact
+
+A natural person with a persistent identity independent of employer, email, or phone changes.
+
+Affiliation
+
+A dated Contact-to-organization, account, or site relationship with role, title, department, confidence, and evidence. Many-to-many is supported.
+
+Contact point
+
+A typed email, phone, fax, or address with validity dates, verification, ownership context, and permitted-use status.
+
+Source record
+
+A record identified by source system, entity type, source ID, and source version. Resident records are counted at this grain.
+
+Golden record
+
+The governed current view at a specified entity grain, with lineage to all contributing records and an effective-dated history.
+
+
+
+A branch, franchise, parent, subsidiary, department, ship-to, and bill-to are relationships or separately mastered entities according to a configured grain. A shared ultimate parent, domain, telephone switchboard, industry code, or address is supporting evidence; none independently proves duplicate identity.
+
+3 Source onboarding and canonical data
+
+ING-01  Source registry
+
+The solution shall manage first-party and third-party sources with owner, category, domain, lifecycle, effective dates, cadence, file pattern, header count, input, reject, and archive locations. Sources can be paused, disabled, and retired through governed configuration.
+
+Acceptance: Only active and effective sources execute; disabling a source stops new ingestion without deleting its historical lineage.  [Baseline; P0]
+
+ING-02  File and extract ingestion
+
+The solution shall ingest CSV, JSON, and Parquet, including large partitioned files, and record source extraction time, delivery ID, checksum, schema version, and record counts. It shall support manual and scheduled delivery and concurrent sources.
+
+Acceptance: All configured formats load; duplicate deliveries are recognized; file-level totals reconcile and successful-file disposition follows the approved retention policy.  [Baseline; P0]
+
+ING-03  Validation and quarantine
+
+Required fields shall vary by entity and source. Malformed, missing-key, invalid-type, and unmapped records shall be quarantined with reason, raw reference, and corrective action. Bad-record thresholds shall be configurable by source and severity.
+
+Acceptance: The configured threshold fails or partially completes a delivery as defined; accepted, rejected, duplicate, and pending records reconcile without silent loss.  [Baseline; P0]
+
+ING-04  Source mapping
+
+Source fields shall map to canonical fields using transformations, data types, storage types and formats, one or multiple date formats, samples, and documentation. Mappings shall support active flags, repeating values, concatenation, and conditional transformations.
+
+Acceptance: Preview shows raw and transformed values; required mappings are validated before activation; changes retain prior versions and actor.  [Baseline; P0]
+
+ING-05  Canonical dictionary
+
+Administrators shall configure attributes and groups, business definitions, display order, enabled status, golden inclusion, match relevance, deterministic or strong or supporting or enrichment roles, and repeating cardinality. Domain and identifier namespace shall be explicit.
+
+Acceptance: Adding an attribute exposes it consistently in ingestion, rule configuration, lineage, authorized UI, and publishing without rebuilding existing records unnecessarily.  [Baseline; P0]
+
+ING-06  Content duplicate suppression
+
+The solution shall suppress unchanged payload reprocessing using a stable hash scoped to source identity and version, while retaining duplicate count, original record reference, and first and last seen times. Distinct source identities with equal values shall retain independent xrefs.
+
+Acceptance: A replay creates no extra active record; identical data from two systems preserves both source IDs; changed payload is processed as an update rather than discarded.  [Baseline; P0]
+
+SRC-01  First-party source coverage
+
+The solution shall onboard configured CRM Accounts and Contacts, SBA Masters, bill-to and ship-to records, ecommerce and registration data, service records, and channel-specific data. First-party membership shall determine Customer classification; authoritative transactional references shall supply separate activity and ownership attributes without importing unrestricted transaction history.
+
+Acceptance: A person and organization present in multiple channels are linked while commercial accounts, source ownership, and source IDs remain distinguishable.  [Extension; P0]
+
+SRC-02  Third-party source coverage
+
+The solution shall support licensed account, site, hierarchy, contact, industry, government, healthcare, education, and enrichment feeds. Example candidates include D&B, Data Axle, ZoomInfo, MDR, GovSpend, and Definitive Healthcare; actual availability and use are contract-dependent.
+
+Acceptance: Each feed has a field contract, permitted purposes, effective dates, refresh cadence, and entitlement policy; no required feature presumes unavailable vendor fields.  [Extension; P0]
+
+SRC-03  Updates and deletions
+
+The solution shall process inserts, updates, deletes, reactivations, source-ID reuse, late arrivals, and full-snapshot reconciliation. Source presence, last seen, tombstone, and business lifecycle state shall be separate. Snapshot omissions count as deletions only under an approved completeness policy.
+
+Acceptance: Out-of-order updates do not overwrite newer facts; confirmed deletions deactivate contributions and refresh affected goldens, relationships, indexes, and exports.  [Extension; P0]
+
+SRC-04  Schema evolution and profiling
+
+Onboarding shall profile distributions, missingness, uniqueness, key overlap, candidate volumes, and data drift. Additive fields can be proposed; breaking schema and datatype changes require impact review. Source IDs and postal codes shall preserve leading zeros.
+
+Acceptance: A numeric-to-character change produces an alert and downstream compatibility assessment; invalid mappings remain quarantined until approved.  [Extension; P0]
+
+SRC-05  Incremental ingestion
+
+The solution shall use source version or watermark controls and idempotent delivery state to process deltas against resident history. Monthly vendor snapshots shall produce differences rather than forcing a full rematch of all records.
+
+Acceptance: An unchanged monthly refresh causes no unnecessary golden version; changed attributes trigger only the affected processing scope.  [Extension; P0]
+
+3 1 Local disk configuration and file operations
+
+FILE-01  Global configuration page
+
+An Administrator shall set and version an absolute base directory through a Global Configuration page. The page shall show validation status, revision, actor and effective time.
+
+Acceptance: Valid authorized paths can be saved; unauthorized users cannot alter the base directory.  [Extension; P0]
+
+FILE-02  Source directories
+
+Each source shall configure its own incoming, processing and reject directories within the base directory. Paths shall resolve canonically and remain distinct across active sources.
+
+Acceptance: Traversal, escaping symlinks, conflicting paths and missing access permissions are rejected.  [Extension; P0]
+
+FILE-03  Configuration changes
+
+Directory changes shall use impact preview and a new configuration revision. Active jobs shall retain their starting revision; changes shall not move active files silently.
+
+Acceptance: A running delivery continues against its approved paths; new deliveries use the new revision only after validation.  [Extension; P0]
+
+FILE-04  Safe file claiming
+
+Processing shall recognize complete deliveries, claim each file once and move or stage it into the source processing directory with a delivery ledger.
+
+Acceptance: Concurrent scanners cannot process the same delivery twice; an unfinished upload is not ingested.  [Extension; P0]
+
+FILE-05  Rejections and reconciliation
+
+Rejected records shall be placed in the source reject directory with reasons and delivery references. Accepted, rejected, unchanged and deferred counts shall reconcile.
+
+Acceptance: Resubmission preserves the original rejection reference and creates no duplicate identity.  [Extension; P0]
+
+FILE-06  Restart and disk health
+
+File operations shall support checkpoints, controlled retries, disk capacity monitoring, access failures and stale delivery detection. Successful-file retention shall be defined before production.
+
+Acceptance: Restarting after file claim or record load causes no logical loss or duplicate publication; low disk or permission errors are visible.  [Extension; P0]
+
+3 2 Standard columns and deleted source identities
+
+Column
+
+Required semantics
+
+ROW_CREATE_TIMESTAMP
+
+UTC timestamp of initial logical-row creation in Entity360; preserved through updates to that row.
+
+ROW_UPDATE_TIMESTAMP
+
+UTC timestamp of the latest accepted row mutation, including deletion; source event ordering is stored separately.
+
+ROW_STATUS
+
+Required state including ACTIVE and DELETED. Additional values require explicit definitions; unknown or missing states are rejected or quarantined.
+
+
+
+The three columns apply to current source and canonical records and the golden row contract. Entity360 may populate its own technical timestamps and ACTIVE state under a documented adapter contract; it shall never silently default a missing source deletion signal. Mapping must preserve source event timestamps separately from Entity360 row timestamps.
+
+DEL-01  Immediate matching exclusion
+
+When ROW_STATUS is DELETED, exclude the source identity and all its historical names, addresses, contact points, aliases and derived features before any subsequent match evaluation.
+
+Acceptance: No current, historical, cached or indexed value from the identity appears as matching evidence.  [Extension; P0]
+
+DEL-02  Purge old records
+
+Remove all current and historical operational records and derived artifacts for the deleted source identity, including candidate entries, source assertions, match evidence and membership contributions.
+
+Acceptance: Counts reconcile across operational stores, indexes and caches; a retained minimal tombstone contains no reusable deleted attributes.  [Extension; P0]
+
+DEL-03  Cluster reprocessing
+
+Remove related match edges and contributions and recompute the affected cluster with remaining nondeleted members. Re-evaluate possible splits, golden winners, hierarchy and affiliations.
+
+Acceptance: A deleted bridge produces the correct separate components; attributes supported only by the deleted identity cannot survive.  [Extension; P0]
+
+DEL-04  Classification and retirement
+
+Recompute Customer or Prospect from remaining valid members. Retire an empty entity rather than publishing an empty Prospect.
+
+Acceptance: Deleting the last first-party member changes Customer to Prospect if third-party members remain; deleting all members retires the entity.  [Extension; P0]
+
+DEL-05  Scoped identity and replay protection
+
+Scope deletion by source system, entity type and source ID, with namespaced key and epoch where needed. Older files, restores and unchanged replays cannot reinstate it.
+
+Acceptance: The same literal ID in another source is unaffected; stale deliveries remain blocked.  [Extension; P0]
+
+DEL-06  Correction propagation
+
+Correct all internal views and configured downstream datasets after cluster reprocessing. Remove deleted-only facts from historical golden outputs as well as current outputs.
+
+Acceptance: No internal history or export exposes the removed source attributes; consumers receive explicit corrections.  [Extension; P0]
+
+DEL-07  Deletion audit and recovery
+
+Retain minimal identity, deletion watermark, time, actor, outcome and processing counts. Purge or sanitize raw and reject copies carrying deleted record data; restoration reapplies deletion markers.
+
+Acceptance: A recovery test cannot resurrect deleted evidence; no audit payload or training snapshot reintroduces the removed attributes.  [Extension; P0]
+
+4 Standardization and quality
+
+DQ-01  Account normalization
+
+The solution shall preserve original and standardized legal and trading names; normalize case, spacing, punctuation, legal suffixes, aliases, address abbreviations, directionals, domains, and phones; and generate prefix, phonetic, street-number, street-name, and PO-box keys.
+
+Acceptance: Equivalent business-name and address variants produce comparable matching features; a PO box remains distinct from a physical site.  [Extension; P0]
+
+DQ-02  International data
+
+The solution shall normalize by country and script; retain diacritics, Unicode and original spellings; handle transliteration as additional evidence; support country-aware postal and phone structures, extensions, and timezone-aware dates.
+
+Acceptance: US ZIP plus four and international postal examples preserve format; phone country codes are not inferred solely from a US area-code rule.  [Extension; P0]
+
+DQ-03  Contact normalization
+
+The solution shall parse first, middle, last, preferred and full names, honorifics and suffixes; manage approved nickname evidence; normalize emails and phones conservatively; and classify personal, business, generic and shared contact points.
+
+Acceptance: Role-based emails are not treated as unique people; name variants can become candidates without being automatically declared the same person.  [Extension; P0]
+
+DQ-04  Configurable rules and parity
+
+Administrators shall define ordered rules and derived expressions with syntax validation, sample testing, audit, and execution limits. Distributed and targeted processing shall produce equivalent canonical results for an identical rule version.
+
+Acceptance: The same sample yields identical features through supported engines; unauthorized code execution and uncontrolled expression workloads are prevented.  [Extension; P0]
+
+DQ-05  Quality and freshness scoring
+
+The solution shall score completeness, validity, consistency, uniqueness, recency and verification at record and attribute level. Domain-specific minimums shall control matching, survivorship, and activation. No missing value shall be fabricated to meet completeness targets.
+
+Acceptance: The UI shows failed checks, score components, and age; invalid high-priority values cannot win over valid eligible alternatives.  [Extension; P0]
+
+DQ-06  Data quality remediation
+
+The solution shall route low-quality data to an owner, display source-level trends, permit corrected resubmission, and distinguish source corrections from governed golden overrides.
+
+Acceptance: A corrected reject is traceable to the original delivery and does not create a second entity or erase the rejection history.  [Extension; P0]
+
+5 Candidate generation and matching
+
+MAT-01  Configurable blocking
+
+The solution shall support field-based and expression-based buckets, required or optional conditions, display order, active flags, boolean gates, and multiple buckets per record. It shall retain candidate-pair origin and deduplicate ordered pairs across buckets.
+
+Acceptance: The same pair is scored once per evaluation version and lists every contributing bucket; null or empty-only keys do not create broad accidental blocks.  [Baseline; P0]
+
+MAT-02  Account candidate keys
+
+The solution shall support normalized domain plus postal code with phonetic fallback, phonetic name plus street fragments plus postal code, phonetic name plus postal code, phone plus postal code, ultimate parent plus postal code, and street plus name plus postal code.
+
+Acceptance: The six reference bucket patterns remain configurable; candidates are generated within compatible grains and countries.  [Baseline; P0]
+
+MAT-03  Oversized and sparse blocks
+
+Per-bucket block-size and pair-volume limits shall protect capacity. Oversized keys shall be subdivided, handled by a governed fallback, or deferred with measurable coverage loss. Sparse records and no-hit records shall receive secondary retrieval or insufficient-evidence status.
+
+Acceptance: A 50K-record common ZIP never launches an unbounded all-pairs job; unprocessed candidates are visible; source-based Prospect classification shall expose incomplete resolution and shall not imply proven absence of enterprise duplicates.  [Baseline; P0]
+
+MAT-04  Deterministic matching
+
+Validated namespaced internal IDs, tax IDs where authorized, DUNS at the correct grain, and approved compound name-address or name-domain conditions shall be configurable. Contradictory strong identifiers shall trigger review or non-match according to precedence.
+
+Acceptance: Equal IDs in unrelated namespaces do not match; exact DUNS does not override grain conflicts or confirmed identifier misuse.  [Baseline; P0]
+
+MAT-05  Feature scoring
+
+The solution shall support Levenshtein, no-space comparison, partial ratio, token-sort and token-set comparisons, phonetic and alternate names, address, domain, phone, vendor evidence, and industry context. Feature weights and missing-value treatment shall be explicit.
+
+Acceptance: A score is reproducible, bounded and explainable; enabled weighted features normalize to a documented scale; copying one vendor into another is not counted as independent consensus.  [Baseline; P0]
+
+MAT-06  Rule builder
+
+Business users shall configure attribute-to-attribute and attribute-to-literal conditions, equality, similarity thresholds, blank tests, boolean tests, AND or OR groups, scoped gates, source sides, and fixed or either-direction evaluation.
+
+Acceptance: Preview explains each condition and connector; invalid references and contradictory rules cannot be promoted.  [Baseline; P0]
+
+MAT-07  Decision thresholds
+
+The solution shall use T_auto and T_review with 0 <= T_review < T_auto <= 1. MATCH_FOUND requires score at least T_auto plus all eligibility gates; CANDIDATES_FOUND lies between thresholds; NO_MATCH lies below T_review after completed evaluation.
+
+Acceptance: Each domain and policy has one approved threshold version; example initial Account values 0.95 and 0.85 remain tunable rather than universal guarantees.  [Baseline; P0]
+
+MAT-08  Match outcomes and explanations
+
+Every evaluated candidate shall retain outcome, feature contributions, rule, model and configuration versions, reasons, evidence timestamp, and audit reference. Processing status shall separately identify incomplete or blocked evaluation.
+
+Acceptance: Stewards can explain an automatic match and a rejected candidate; a timeout is never reported as NO_MATCH.  [Baseline; P0]
+
+MAT-09  Matching across time and sources
+
+New and updated records shall match incoming records, current resident source evidence, aliases, and applicable historical identifiers. First-to-first, first-to-third, and third-to-third resolution shall be supported.
+
+Acceptance: A new vendor feed attaches to prior goldens where supported; unchanged old evidence remains available for comparing new records.  [Baseline; P0]
+
+CON-01  Contact candidate generation
+
+The solution shall generate Contact candidates using verified or normalized email plus supporting name, phone plus name, name plus affiliation, source-person IDs, and multilingual name variants. It shall search across employers as well as within an employer.
+
+Acceptance: A changed employer does not automatically create a new person; repeated names at one employer do not automatically merge.  [Extension; P0]
+
+CON-02  Contact identity protection
+
+Matching shall consider verified person IDs, name evidence, email and phone ownership periods, account affiliation, and contradictory identity facts. A shared inbox, switchboard, household phone, or common email domain shall not alone auto-match people.
+
+Acceptance: Two people using purchasing@example.com remain separate; recycled emails and phones trigger temporal checks or review.  [Extension; P0]
+
+CON-03  Person and employment separation
+
+Person identity shall be resolved separately from employer, site, job title and affiliation. The solution shall retain prior employers and simultaneous roles, support contractors and consultants, and assign current-affiliation confidence.
+
+Acceptance: A contact moving from Account A to B keeps their person ID while the old role becomes historical; uncertain employment is not published as verified.  [Extension; P0]
+
+CON-04  Contact usability
+
+A Contact may exist with sparse channels; activation shall require configured identity, validity, current affiliation and permission criteria. Verification, bounce, deceased or inactive flags, and do-not-contact signals shall be preserved independently.
+
+Acceptance: A valid-looking vendor email cannot override an authoritative suppression; matchable contacts with no usable channel stay mastered but ineligible for outreach.  [Extension; P0]
+
+6 Clustering and identity lifecycle
+
+ID-01  Constrained clustering
+
+The solution shall form entities from approved edges while enforcing grain, trusted-identifier and cannot-link constraints across the entire cluster. Connected-component traversal shall not override negative evidence through an intermediate record. User-configured source membership limits apply to the complete prospective cluster and cannot be bypassed by exact scores, fuzzy scores or intermediate records; see section 23.
+
+Acceptance: If A matches B and B resembles C but A and C have a prohibited conflict, the system avoids an unsafe bridge and creates a review case.  [Extension; P0]
+
+ID-02  Stable golden identifiers
+
+The solution shall create opaque persistent golden IDs and reuse historical xrefs for established identities. Source keys shall be scoped by source, entity type and namespace. Singleton eligible records can receive new IDs.
+
+Acceptance: Repeated batches preserve IDs; recycled source IDs create versioned identity mappings rather than hijacking the prior entity.  [Extension; P0]
+
+ID-03  Merge and redirect
+
+When existing identities truly merge, a configurable survivor policy shall retain the established or oldest eligible ID. Retired IDs shall redirect to the survivor and all xrefs, relationships and consumers shall receive the merge event.
+
+Acceptance: Both prior IDs remain resolvable through lineage; the merge preview lists affected accounts, contacts, sites and downstream references.  [Extension; P0]
+
+ID-04  Split and unmerge
+
+Authorized stewards shall reverse erroneous merges or split clusters with evidence, approvals, effective dates and impact analysis. Overrides and cannot-link decisions shall survive subsequent runs unless explicitly superseded.
+
+Acceptance: An unmerge restores correct member assignments and publishes correction events without deleting decision history.  [Extension; P0]
+
+ID-05  Persistent membership and incremental repair
+
+Membership and permitted matching evidence shall include current and historical nondeleted records, not merely the latest batch. Updates and edge removals shall trigger recomputation of impacted components; expanding impact may require a larger rebuild.
+
+Acceptance: Deleting a bridge edge can split the affected entity correctly; untouched components retain IDs and versions.  [Extension; P0]
+
+ID-06  Lifecycle management
+
+Account, organization, site and person states shall include active, inactive, merged, split, review and source-deleted as appropriate, with separate source-based Customer or Prospect classification under CLS rules and separate activity or commercial status attributes.
+
+Acceptance: A source deletion purges that identity under DEL; it does not erase an entity supported by another source; closing a site does not close the entire parent organization.  [Extension; P0]
+
+7 Hierarchies and Account Contact relationships
+
+REL-01  Multiple hierarchy views
+
+The solution shall maintain legal ownership, ultimate parent, operating hierarchy, commercial bill-to and ship-to structure, and channel or CRM structures as distinct effective-dated views. Conflicting vendor hierarchies shall preserve evidence and confidence.
+
+Acceptance: A parent and branch remain distinct identities; the UI shows which hierarchy and source support each edge.  [Extension; P0]
+
+REL-02  Affiliation resolution
+
+Vendor employer IDs, first-party account IDs, location identifiers and corroborating name-domain-address evidence shall link Contacts to organizations, Accounts and sites. Ambiguous or orphan affiliations shall remain unresolved rather than forced.
+
+Acceptance: A contact with two plausible employers is queued or labeled ambiguous; a reliable new employer record resolves the orphan with lineage.  [Extension; P0]
+
+REL-03  Relationship quality
+
+The solution shall enforce valid endpoints, relationship types, temporal consistency and cycle detection in hierarchies intended to be trees. Multiple valid parent views and multiple simultaneous affiliations shall be supported.
+
+Acceptance: Invalid cycles are prevented or quarantined; a merge or split remaps relationships without dangling references.  [Extension; P0]
+
+REL-04  Channel ownership and protection
+
+Channel, account owner, territory, assigned rep and relationship status shall remain first-party business facts. Shared organization identity shall not automatically transfer account ownership or authorize cross-channel activation.
+
+Acceptance: A prospect already owned by another channel is flagged with routing or suppression instead of automatically distributed to a competing sales queue.  [Extension; P0]
+
+8 Survivorship enrichment and golden records
+
+SUR-01  Attribute and group policies
+
+The solution shall support source priority, first eligible non-null waterfall, most recent business timestamp, most frequent value, longest valid value, quality-based selection, and deduplicated aggregation. A configured coherent survivorship group shall select one eligible source row and copy all of its group attributes from that row; independent groups may select different rows. See section 20 for group configuration and decision semantics.
+
+Acceptance: The selected address cannot mix a street from one entity with a city from another; candidate values and every winning reason remain available.  [Extension; P0]
+
+SUR-02  Waterfalls and precedence
+
+Group waterfalls shall support populated anchor fields, required components, most-recent selection and source priorities, with effective dates and deterministic tie-breaking. Field freshness and vendor eligibility shall precede purely cosmetic length.
+
+Acceptance: The reference address waterfall of street populated, postal code populated, then recency can be reproduced and versioned.  [Extension; P0]
+
+SUR-03  First-party authority
+
+Customer and Prospect classification shall use CLS rules; channel ownership and contact permissions shall use designated first-party authority. Vendor enrichment can improve permitted business attributes but shall not overwrite authoritative transaction or permission facts.
+
+Acceptance: A vendor prospect flag cannot override first-party cluster membership; a third-party opt-in does not defeat first-party suppression.  [Extension; P0]
+
+SUR-04  Multiple values and assertions
+
+The solution shall retain alternate names, emails, phones, addresses and provider facts with source, validity, quality, and confidence. Only configured eligible primary values appear as primary golden attributes.
+
+Acceptance: Nondeleted losing values remain traceable and usable as appropriate historical evidence; duplicate aliases are consolidated without losing source contribution.  [Extension; P0]
+
+SUR-05  Overrides and conflicts
+
+Stewards shall approve sensitive values and conflicts, apply reasoned overrides with scope and expiry, and review overrides invalidated by fresh evidence. Industry and revenue disagreements shall be reviewable by policy.
+
+Acceptance: A protected override persists through refresh, expires as configured, and leaves the previous and replacement decisions in audit.  [Extension; P0]
+
+SUR-06  Golden current and history
+
+The solution shall publish current Account and Contact views with source xrefs, member counts, quality, provenance, business effective dates, version, last batch, and timestamps. History shall cover retained nondeleted attributes and relationships; DEL purge requirements override historical retention.
+
+Acceptance: An as-of query reconstructs a previously published value and membership; unchanged values do not create artificial history versions.  [Extension; P0]
+
+SUR-07  Third-party enrichment
+
+The solution shall attach licensed industry, size, revenue, employee, geographic, hierarchy, job role, seniority and validated contact facts at their proper grain. Staleness and source availability shall control selection.
+
+Acceptance: An expired vendor assertion is excluded from future outputs per policy while permitted historical audit remains accessible; conflicting values display their source and age.  [Extension; P0]
+
+9 Customer and Prospect classification
+
+Entity360 classifies each Account and Contact cluster from the provenance of its current contributing members. Customer means at least one first-party source record belongs to the cluster. Prospect means the nonempty cluster contains only third-party source records. No purchase, activity window, CRM lead status, ownership, score or contact permission is required to make this classification. A first-party CRM prospect record therefore makes an Entity360 Customer cluster. The label describes enterprise source presence rather than a claim that a purchase occurred.
+
+Classification applies independently at each mastered grain. A third-party-only Contact associated with a Customer Account remains a Prospect Contact. A first-party Contact does not make its third-party-only employer Account a Customer unless a first-party Account record belongs to that Account cluster. Parent, child and Site relationships do not propagate classification. Match evaluation status and lifecycle remain separate fields and are not additional customer classes.
+
+CLS-01  Source based rule
+
+The solution shall publish Customer when first_party_member_count is greater than zero; otherwise publish Prospect for a nonempty cluster with only third-party members. Source category shall come from an approved source registry, never inferred from a winning attribute.
+
+Acceptance: First-party only and mixed clusters are Customers; third-party-only clusters are Prospects, including singleton clusters.  [Extension; P0]
+
+CLS-02  Domain independence
+
+Account and Contact membership shall be evaluated independently. A linked Account, Site, parent or employer shall not donate its classification to another cluster.
+
+Acceptance: A vendor-only person linked to a CRM Account remains a Prospect Contact; a CRM Contact linked to a vendor-only Account remains a Customer Contact and Prospect Account.  [Extension; P0]
+
+CLS-03  Classification evidence
+
+Goldens, UI, APIs, exports and warehouse views shall expose entity_class, first-party and third-party member counts, contributing sources, rule version, as-of publication and reason.
+
+Acceptance: A user can trace Customer to a specific first-party member even if every surviving display attribute came from a vendor.  [Extension; P0]
+
+CLS-04  Reclassification
+
+Membership changes, merges, splits, confirmed deletions and governed source-category changes shall recompute classification and publish old and new classes with reason and effective time. Only current eligible nondeleted members count.
+
+Acceptance: Adding the first first-party member changes Prospect to Customer without creating a new entity; removing the last first-party member changes Customer to Prospect if third-party members remain.  [Extension; P0]
+
+CLS-05  Lifecycle and history
+
+Inactive but retained contributing first-party members continue to make Customer clusters. Deleted or withdrawn members no longer count, though permitted history retains prior classification. Empty entities shall be retired rather than classified Prospect.
+
+Acceptance: A dormant Customer remains Customer; deleting all members retires the entity; disabling ingestion alone does not remove existing members.  [Extension; P0]
+
+CLS-06  Incomplete processing
+
+Published classification shall describe accepted membership. Match confidence, evaluation completeness, deferred candidates and review status shall be separate. Incomplete retrieval shall not be presented as proof that a Prospect has no enterprise duplicate.
+
+Acceptance: A vendor-only singleton can be published as Prospect with resolution_complete false and held from duplicate-sensitive activation pending resolution.  [Extension; P0]
+
+CLS-07  Governed delivery
+
+Customer and Prospect filters shall operate consistently across all interfaces. Contact usability, permitted purpose, suppression, channel ownership and approval remain independent delivery gates.
+
+Acceptance: A suppressed Customer Contact is not exported for outreach; a Prospect cannot bypass channel or licensing controls.  [Extension; P0]
+
+CLS-08  Classification analytics
+
+Dashboards shall show Customers and Prospects separately for Accounts and Contacts, source overlap and unique contribution, reclassification history, quality, review volumes and approved routing outcomes.
+
+Acceptance: Each metric names its grain, publication and denominator; an affiliation does not double-count a unique person.  [Extension; P0]
+
+10 Stewardship configuration and user experience
+
+UI-01  Review case management
+
+The solution shall queue ambiguous matches, survivorship conflicts, sensitive attributes, data quality, hierarchy conflicts, oversized clusters and affiliation issues. Cases shall show side-by-side evidence, batch, candidate data, assignment, reason, comments and decision.
+
+Acceptance: Cases move through open, in review, approved, rejected or deferred with actor and timestamp; deferred cases remain visible and actionable.  [Baseline; P0]
+
+UI-02  Durable stewardship
+
+Stewards shall approve or reject matches, apply cannot-link and must-link judgments, edit eligible fields, merge, split and escalate. Concurrent decisions shall use conflict detection and approval rules.
+
+Acceptance: A rejected match does not recur as an automatic merge in the next run; simultaneous edits cannot silently overwrite a prior decision.  [Baseline; P0]
+
+UI-03  Configuration administration
+
+Authorized users shall manage sources, mappings, canonical attributes and groups, golden fields, standardization, blocking, algorithms, conditions, weights, thresholds, survivorship and users or roles without direct SQL.
+
+Acceptance: Each screen validates references and inputs, supports preview and governed retirement, and records before and after values.  [Baseline; P0]
+
+UI-04  Configuration release control
+
+Changes shall be versioned, testable, approved and promoted as atomic policy bundles. A running job shall retain its starting version; approved changes apply to the next eligible job. Rollback and impact comparison shall be supported.
+
+Acceptance: A mid-run threshold edit cannot change half a batch; promotion reports expected merges, splits, quality changes and consumer impact.  [Baseline; P0]
+
+UI-05  Monitoring and exploration
+
+The UI shall provide batch history, stage and file drill-down, matching output, blocking-expression tests, source-record search, golden current and history, xrefs, lineage, hierarchy and contact affiliation views, config audit and exports. File and CSV viewers shall obey access policy.
+
+Acceptance: An authorized user traces a golden field to raw source and policy version; large result views use bounded pagination rather than loading the entire dataset.  [Baseline; P0]
+
+UI-06  Usability and access
+
+The UI shall provide filters, understandable error messages, saved views, bulk actions with preview, accessible navigation, and domain-specific permissions. Login and logout shall be supported; reads as well as writes shall be authorized.
+
+Acceptance: A viewer cannot access restricted Contact data by direct URL or export; an analyst only edits permitted pages and domains.  [Baseline; P0]
+
+11 Orchestration publishing and APIs
+
+OPS-01  Pipeline modes
+
+The solution shall support ingest, standardize, block, match, cluster, survive and publish stages; full batch, match-only, create-golden from staged data, targeted rematch, full rebuild, ad hoc test, and controlled reprocess modes.
+
+Acceptance: Match-only stops before golden modification; rematch retains persistent identity and approved stewardship; staging-to-golden uses the specified policy version.  [Extension; P0]
+
+OPS-02  Scheduling and batch control
+
+Runs shall have unique batch IDs with human-readable YYYYMMDD_NNN support, start and end times, config version, record and stage counters, progress and RUNNING, SUCCESS, FAILED or PARTIAL status. Parallel sources shall use globally safe sequencing.
+
+Acceptance: Concurrent workers cannot reuse a run ID; operators can compare runs and identify the exact failed delivery, partition and stage.  [Extension; P0]
+
+OPS-03  Recovery and publish consistency
+
+The solution shall checkpoint partitions, retry transient failures with bounded backoff, quarantine persistent failures, and resume safely. Publication shall expose a complete validated version and prevent mixed golden, xref and relationship states.
+
+Acceptance: Fault injection before and after a write yields no lost or duplicate logical records; consumers stay on the prior valid publication until the new version commits.  [Extension; P0]
+
+OPS-04  Future external read-only match API
+
+In a later release, the solution shall preserve Account lookup behavior and add Contact lookup with source identity, domain-specific attributes, return-candidate flag and bounded candidate limit. Responses shall include MATCH_FOUND, CANDIDATES_FOUND or NO_MATCH, golden ID and record, scores, reasons, features and audit ID.
+
+Acceptance: A lookup makes no ingestion or golden changes; invalid input is rejected; dependencies unavailable return a processing error rather than a false non-match.  [Extension; P1]
+
+OPS-05  Internal exploration and future consumer APIs
+
+Internal application screens shall support governed exploration. External consumers in a later release shall query by golden or source ID, search exact and fuzzy fields, retrieve history, xrefs, hierarchy and affiliations, and receive permission-filtered output. Health and readiness endpoints shall be available.
+
+Acceptance: Retired golden IDs redirect predictably; pagination and rate limits apply; sensitive features and evidence are masked according to authorization.  [Extension; P0]
+
+OPS-06  Bulk and delta publishing
+
+The solution shall publish warehouse views and approved CSV or Parquet extracts; external API JSON delivery is deferred. It shall publish, full snapshots and changed-record deltas with schema and publication version, checksums and control totals. Merge, split, delete and suppression corrections shall be explicit events.
+
+Acceptance: A consumer replays a delta without double application and reconciles it to a full snapshot at the same watermark.  [Extension; P0]
+
+OPS-07  Consumer contracts
+
+Output contracts shall define entity grain, null semantics, datatype, ID and alias behavior, freshness, schema evolution, acknowledgment and replay. Business data access shall be consistent across UI, API, export and warehouse.
+
+Acceptance: A consumer cannot recover prohibited vendor fields through an alternate interface; schema-breaking changes require controlled version adoption.  [Extension; P0]
+
+12 Security governance and audit
+
+GOV-01  Roles and separation of duties
+
+The solution shall retain Administrator, Analyst and Viewer roles with configurable page edit permissions and add Steward, Approver, Operator, Consumer and Auditor capabilities. Object, field, domain and export access shall be configurable.
+
+Acceptance: Tests cover positive and negative UI and API access; high-impact policy changes and bulk merges have independent approval where configured.  [Extension; P0]
+
+GOV-02  Authentication and secrets
+
+Production shall support enterprise SSO, managed user lifecycle, service identities, session expiry, and organization-mandated authentication controls. Credentials shall be managed outside code; any retained local login shall use strong password hashing.
+
+Acceptance: Deactivated identities lose access; demo or seeded users are disabled or replaced; no source or platform secret appears in logs or exports.  [Extension; P0]
+
+GOV-03  Protection and entitlements
+
+The solution shall encrypt transit and storage, mask restricted personal and commercial data, enforce vendor field-level permitted use and time limits, and audit exports. Contact permission is purpose, channel, source and jurisdiction scoped.
+
+Acceptance: Vendor expiry or suppression blocks new activation and restricted export; golden merges cannot broaden the permission of any contact point.  [Extension; P0]
+
+GOV-04  Deletion retention and restoration
+
+Approved retention and deletion policies shall cover raw, stage, goldens, histories, candidate evidence, caches, search indexes, exports and backups. Legal holds and minimal non-sensitive audit evidence shall follow approved policy. Restores must reapply tombstones.
+
+Acceptance: A deletion test reconciles all active surfaces and emits consumer corrections; restoring a backup cannot resurrect suppressed personal data for activation.  [Extension; P0]
+
+GOV-05  Decision lineage and replay
+
+The solution shall record input snapshot or immutable reference, blocking rule, features, match and cluster decision, survivorship candidates and winner, batch, model, configuration, actor and time. Configuration audit shall record old and new values and pending, approved, rejected or waived status.
+
+Acceptance: A historical decision can be reconstructed within its retained evidence window; nondeterministic or external-model dependencies disclose replay limits.  [Extension; P0]
+
+GOV-06  Data governance ownership
+
+Each source, golden domain, hierarchy, critical attribute and classification policy shall have a business owner and steward. Quality incidents, disputed values, and policy exceptions shall have documented escalation and resolution.
+
+Acceptance: Production onboarding cannot complete without ownership, acceptance rules, source agreements and operating procedures.  [Extension; P0]
+
+13 Capacity performance and resilience
+
+The capacity requirement is 1.5 billion simultaneously resident logical source records across Accounts and Contacts, including the evidence needed to match incremental changes. It does not mean 1.5 billion golden entities or 1.5 billion newly loaded records every night. Historical versions, raw payloads, relationship edges, candidate pairs, audit records and indexes are additional storage and processing loads and must be sized separately. An approved workload must state the Account versus Contact mix and source-record-to-golden ratio.
+
+At 1.5B records, all-pairs comparison would produce approximately 1.125 quintillion pairs. Bounded candidate retrieval, distributed execution and controlled affected-component processing are therefore release requirements. The 10M-record targets in the references cannot be extrapolated into a proven 1.5B service level.
+
+SCALE-01  Resident-scale operation
+
+Ingestion, candidate retrieval, matching, clustering, survivorship, history, browsing and lookup shall work against the 1.5B resident-record footprint without moving the corpus into a single process. IDs, counters and partition offsets shall support values above 32-bit limits.
+
+Acceptance: A full-scale benchmark validates end-to-end correctness, lookup and delta processing with representative skew, sparsity, source multiplicity and Contact affiliations.  [Extension; P0]
+
+SCALE-02  Distributed processing
+
+The production data plane shall use partitioned distributed or warehouse-native processing, bulk reads and writes, locality-aware retrieval, spill control, checkpointing and independent worker scaling. Per-record remote ORM operations shall not be the bulk path.
+
+Acceptance: A lost worker resumes from committed checkpoints; hot partitions do not exhaust driver memory; throughput and resource costs are reported per stage.  [Extension; P0]
+
+SCALE-03  Bounded candidate cost
+
+Candidate budgets, block subdivision, cross-partition resolution and deferred-work queues shall balance cost and recall. No arbitrary top-K cutoff shall silently discard valid match evidence. Candidate counts and recall loss shall be measurable.
+
+Acceptance: Load tests include common domains, switchboards and huge parent families; fallback coverage and cap-hit counts are visible.  [Extension; P0]
+
+SCALE-04  Incremental graph scope
+
+Updates shall compare against the resident corpus and re-evaluate affected graph neighborhoods, survivorship, hierarchy, affiliations and Customer or Prospect classification. Broad rule changes shall use controlled backfills or shadow rebuilds.
+
+Acceptance: A delta that touches an existing large component expands processing correctly or defers explicitly; a nightly delta is not a mandatory full-history scan.  [Extension; P0]
+
+SCALE-05  Highly available control plane
+
+Configuration, security, run state, metrics and review decisions shall use an enterprise transactional store or equivalent service with concurrency, backup and failover. SQLite may remain for development or isolated deployments.
+
+Acceptance: Concurrent policy edits and worker checkpoints retain consistency during failover; the control plane is not a single local-file production dependency.  [Extension; P0]
+
+SCALE-06  Cost and retention controls
+
+The solution shall expose compute, storage, index, model and vendor-service usage by source, stage and run. Evidence retention, cold storage and sampled operational telemetry shall be configurable without losing required decision lineage.
+
+Acceptance: Budgets trigger alerts or controlled throttling; a 1.5B sizing model includes raw, canonical, golden, history, edges, audit and backup multipliers.  [Extension; P0]
+
+SCALE-07  Availability and disaster recovery
+
+The solution shall isolate batch and interactive workloads, back up control and operational state, and prove coordinated recovery of published data and identity. Proposed online availability is 99.9 percent monthly; proposed RPO is 15 minutes for accepted transactional changes and RTO is four hours.
+
+Acceptance: A recovery exercise measures achieved RPO and RTO; replay restores the correct publication, xrefs and suppressions without duplicate identity.  [Extension; P0]
+
+13 1 Proposed benchmark targets
+
+Measure
+
+Target and acceptance context
+
+Nightly delta
+
+10M accepted changed records through publication in under 6 hours against the resident 1.5B corpus; proposed gate subject to measured candidate and affected-component workload.
+
+Reference stage targets
+
+Retain planning targets: blocking 10M input records under 1 hour; matching 1M candidate pairs under 2 hours; clustering and survivorship under 1 hour for the approved benchmark component size. Test independently; do not assume these cover all pairs from a 10M run.
+
+Future external API lookup
+
+Deferred external scope. Proposed p95 under 500ms for a bounded lookup at 100 concurrent requests with 1.5B resident records; report throughput, p99, timeout and cache hit rates. Complex bulk or graph requests use separate asynchronous budgets.
+
+Dashboard
+
+Retain under 100ms target for a cached summary query; proposed p95 under 2 seconds for an interactive first page. Corpus scans and exports execute asynchronously.
+
+Initial load and full rebuild
+
+No inherited timing guarantee. Before architecture approval, set deadlines and costs based on a measured 10M to 100M to 500M to 1.5B ramp, with candidate volumes, source mix and representative distributions.
+
+Quality
+
+Reference targets: precision at least 98 percent, duplicate recall at least 95 percent, duplicate reduction at least 95 percent, required-field completeness at least 90 percent, standardization validity at least 99 percent.
+
+Operations
+
+Reference targets: processing errors under 0.1 percent, manual review under 5 percent, throughput at least 2M records per hour, routine source onboarding under one week after complete data contract and access.
+
+Review SLA
+
+Proposed 24-hour initial triage for standard cases, with workload-aware staffing and escalations. Review reduction shall never be achieved by unsafe auto-matching.
+
+
+
+At 10M changes per day, a five-percent review rate could mean 500,000 affected records, which is not a viable staffing assumption without case aggregation and prioritization. Report unique actionable cases, handling time and reviewer capacity. Propose stricter production auto-merge precision, such as 99.5 percent, for sensitive Contact and customer identity after holdout evaluation; do not increase automation until measured quality supports it.
+
+13 2 Benchmark evidence and release gates
+
+The benchmark shall record dataset sizes by domain, unique entities, source count, change rate, record width, average and tail candidates per changed record, giant-component distribution, concurrency, infrastructure, run settings, and total cost. Test broad business-name variation, common personal names, international data, very large hierarchies, shared contact points, stale evidence, deletion and replay. Include cold and warm lookup behavior and concurrent batch processing.
+
+Quality tests shall use independently adjudicated labels and untouched holdouts stratified by domain, source pair, country, sparse data and difficult cases. Measure candidate recall separately from scoring recall, and pair accuracy separately from cluster over-merge and split error. State sample sizes, class imbalance and uncertainty. Validate person identity and affiliation accuracy independently. A headline average cannot hide an unacceptable high-risk segment.
+
+Scale acceptance requires count reconciliation, stable IDs, retained constraints, correct merges and splits, fault recovery, publish atomicity, suppression enforcement, and repeatable cost reporting at the full footprint. Passing a smaller test or storing 1.5B rows alone is insufficient. Full-scale run duration and budget must be approved before production commitment.
+
+14 Recommended additional capabilities
+
+These recommendations extend the baseline and should enter the roadmap in dependency order. AI-generated suggestions must remain distinguishable from source evidence and cannot invent golden facts. The roadmap targets TAMR-like mastering capabilities. It does not assert implemented feature or performance parity.
+
+ADD-01  Learned matching and active learning
+
+Train separate Account and Contact models from adjudicated evidence, select informative review cases, version features and labels, and monitor drift.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. Improves difficult-match recall and concentrates steward effort. Requires label quality, holdouts, explainability and rollback.  [Recommendation; P1]
+
+ADD-02  Monthly model evaluation and controlled retraining
+
+Evaluate after monthly third-party refreshes; retrain when data, features or drift justify it. New user-selected fields trigger feature-impact testing. Promotion requires holdout quality and replay validation.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. Adapts to source change without automatically publishing a worse model. Requires stable label sets and model registry.  [Recommendation; P1]
+
+ADD-03  Change data capture and streaming
+
+Add governed source APIs, CDC and event ingestion, with ordering, idempotency, lateness and reconciliation.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. Reduces identity and classification staleness. Requires the P0 delta and deletion contract first.  [Recommendation; P1]
+
+ADD-04  Duplicate prevention before CRM creation
+
+Provide low-latency match-before-create, request identity and concurrent-create protection, with review for uncertain results.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. Prevents new duplicates rather than repeatedly cleaning them. Requires lookup capacity and consumer workflow integration.  [Recommendation; P1]
+
+ADD-05  Governed source writeback
+
+Offer approved mapping-based correction and creation with preview, source authority checks, loop prevention, idempotency and acknowledgments.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. Closes remediation and prospect activation loops. Requires named source owners and rollback strategy.  [Recommendation; P1]
+
+ADD-06  External validation and geospatial support
+
+Use licensed address, geocode, email and phone validation with status, timestamp and cost controls. Keep geospatial proximity as supporting evidence.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. Improves channel usability and site resolution. Requires source rights and verified quality lift.  [Recommendation; P1]
+
+ADD-07  Semantic candidate retrieval
+
+Use evaluated multilingual embeddings or approximate retrieval to supplement sparse or name-variant blocks; retain explicit coverage metrics.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. May improve recall where deterministic keys are weak. Requires benchmarked retrieval recall and bounded costs.  [Recommendation; P2]
+
+ADD-08  AI configuration and review assistance
+
+Suggest mappings, summaries and test cases in a sandbox; require approved structured changes and preserve prompts and model versions where permitted.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. Reduces onboarding and investigation effort. Requires tool permissions and protection against untrusted source text driving actions.  [Recommendation; P2]
+
+ADD-09  Opportunity and next best enrichment analytics
+
+Estimate role coverage and account potential using mastered, permitted data; disclose drivers, confidence and observed versus inferred values.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. Supports prioritization of Customers and Prospects. Requires historical outcomes and independent business value validation.  [Recommendation; P2]
+
+ADD-10  Additional domains and regional deployment
+
+Extend the metamodel to suppliers, healthcare providers or locations and evaluate regional deployment based on requirements.
+
+Acceptance: A pilot measures the stated benefit, meets the applicable governance and quality gates, and has a documented rollback. Reuses identity and stewardship capabilities. Requires separate grain, privacy, quality and capacity acceptance.  [Recommendation; P2]
+
+15 Business scenario and acceptance catalog
+
+The catalog defines the principal end-to-end, exception and boundary scenarios for UAT. Each scenario shall be exercised with source-specific variants and the same policy versions used for production. It supplements the acceptance conditions attached to individual requirements.
+
+SC-01  New organization across sources
+
+Trigger: Salesforce, D&B and billing name or address variants. Expected result: One organization at the agreed grain; retain every source xref and explain surviving attributes.
+
+SC-02  Unchanged delivery replay
+
+Trigger: Same file delivered twice. Expected result: No duplicate active records or duplicate consumer events; delivery and duplicate counts reconcile.
+
+SC-03  Equal payload different sources
+
+Trigger: Two source IDs have exactly equal values. Expected result: Preserve both source identities; resolve their entity through matching, not destructive hash suppression.
+
+SC-04  Name variation
+
+Trigger: Acme Inc and Acmee Incorporated with corroborating location. Expected result: Generate candidates; configurable phonetic and string features support review or approved match.
+
+SC-05  Revenue conflict
+
+Trigger: First-party and vendor revenue bands disagree. Expected result: Apply configured eligibility and recency policy; show both assertions and winning reason.
+
+SC-06  Ambiguous Account pair
+
+Trigger: Similar name and shared domain but conflicting evidence. Expected result: Queue review within configured threshold band; never auto-merge solely on a domain.
+
+SC-07  New source onboarding
+
+Trigger: Acquired CRM delivers 50K records. Expected result: Validate mappings, compare with resident evidence, reuse justified IDs, and quarantine bad records.
+
+SC-08  Threshold change
+
+Trigger: Engineer adjusts weights and thresholds. Expected result: Shadow comparison exposes merge and split impact; one approved bundle applies to each run.
+
+SC-09  Trusted identifier conflict
+
+Trigger: Equal DUNS but incompatible entity grain or trusted facts. Expected result: Review or reject according to precedence; do not blindly match regardless of contradictions.
+
+SC-10  Identifier collision
+
+Trigger: Same numeric source ID in two systems. Expected result: Keep namespaces separate; no deterministic collision.
+
+SC-11  Same name different companies
+
+Trigger: ABC Services in two countries or addresses. Expected result: Retain distinct identities unless sufficient positive evidence establishes sameness.
+
+SC-12  Shared corporate domain
+
+Trigger: Parent and several branches share website. Expected result: Link hierarchy; retain distinct organization or site identities.
+
+SC-13  Co-located businesses
+
+Trigger: Several businesses share building, suite or coworking address. Expected result: Use identity evidence and unit detail; address similarity alone is insufficient.
+
+SC-14  PO box and physical address
+
+Trigger: Business has mailing box and office address. Expected result: Retain typed addresses; name plus ZIP alone cannot prove the same site.
+
+SC-15  Missing address phone rule
+
+Trigger: Name plus phone with blank address. Expected result: Evaluate approved compound rule and shared-phone risk; record blank semantics accurately.
+
+SC-16  Shared ultimate parent
+
+Trigger: Subsidiaries share parent and ZIP. Expected result: Form hierarchy candidates; do not collapse distinct subsidiaries automatically.
+
+SC-17  SIC or NAICS equality
+
+Trigger: Two businesses have same industry code. Expected result: Use industry as supporting context, never a unique identity key.
+
+SC-18  No blocking hit
+
+Trigger: Sparse account lacks useful retrieval keys. Expected result: Flag insufficient evidence or use fallback; classify from current source membership and expose incomplete resolution separately.
+
+SC-19  Oversized block
+
+Trigger: 50K rows share ZIP or switchboard. Expected result: Subdivide or defer visibly; preserve coverage accounting and workload limits.
+
+SC-20  Unsafe bridge
+
+Trigger: A matches B, B matches C, A conflicts with C. Expected result: Prevent prohibited transitive merge; explain conflict and queue review.
+
+SC-21  Historical ID reuse
+
+Trigger: Existing source record refreshed next month. Expected result: Preserve golden ID and effective-dated source mapping.
+
+SC-22  Two goldens truly bridge
+
+Trigger: Fresh evidence establishes same entity. Expected result: Retain approved survivor ID, redirect retired ID, and publish merge correction.
+
+SC-23  Erroneous merge reversal
+
+Trigger: Steward identifies two separate companies or people. Expected result: Split or unmerge; preserve audit, redirects and corrected consumer references.
+
+SC-24  Legal acquisition
+
+Trigger: Company acquired but remains legally separate. Expected result: Update dated ownership edges; merge only when identity itself changes.
+
+SC-25  Site move or closure
+
+Trigger: Business relocates or closes one branch. Expected result: Apply site lifecycle policy, retain address history and avoid closing its parent.
+
+SC-26  Full snapshot missing rows
+
+Trigger: Vendor refresh is incomplete. Expected result: Quarantine snapshot or apply completeness policy; do not mass-delete from unexplained omission.
+
+SC-27  Source delete with other support
+
+Trigger: Vendor removes record still present in CRM. Expected result: Deactivate vendor contribution; retain entity from remaining support and recompute survivor.
+
+SC-28  Late stale update
+
+Trigger: Older delivery arrives after newer record. Expected result: Preserve history; do not overwrite newer current facts.
+
+SC-29  Recycled source ID
+
+Trigger: CRM reuses a retired record key. Expected result: Disambiguate identity version and avoid attaching a new person to the retired entity.
+
+SC-30  Grouped address selection
+
+Trigger: One source has street only, another has complete address. Expected result: Select an eligible coherent group and log waterfall and losing candidates.
+
+SC-31  Steward override refresh
+
+Trigger: Vendor feed contradicts approved override. Expected result: Honor scope and expiry, or raise conflict; never silently erase the override.
+
+SC-32  One person multiple vendors
+
+Trigger: Same person appears in CRM and two contact providers. Expected result: Create one Contact when supported; retain distinct evidence and contact points.
+
+SC-33  Same name same employer
+
+Trigger: Two employees named John Smith. Expected result: Remain separate absent stronger identity evidence; queue uncertainty.
+
+SC-34  Nickname and transliteration
+
+Trigger: Liz and Elizabeth or script variants. Expected result: Use approved evidence and corroboration; preserve original name forms.
+
+SC-35  Job change
+
+Trigger: Contact moves from Account A to B. Expected result: Preserve person ID, end or qualify prior affiliation, and establish dated new affiliation.
+
+SC-36  Multiple current roles
+
+Trigger: Consultant serves two organizations. Expected result: Preserve simultaneous affiliations and role-specific contact channels.
+
+SC-37  Shared role inbox
+
+Trigger: Several people use purchasing@example.com. Expected result: Classify shared channel; do not merge people or infer a named person.
+
+SC-38  Recycled email or phone
+
+Trigger: A former employee channel is reassigned. Expected result: Check ownership dates and conflicting names; avoid false person merge.
+
+SC-39  Personal email employer
+
+Trigger: Contact uses consumer email domain. Expected result: Do not infer employer from the domain; require independent affiliation evidence.
+
+SC-40  Orphan vendor contact
+
+Trigger: Employer account unresolved. Expected result: Master eligible person but hold affiliation and activation pending evidence.
+
+SC-41  Contact suppression
+
+Trigger: Vendor email is valid but CRM says do not contact. Expected result: Retain suppressed point where permitted; block outreach and activation exports.
+
+SC-42  No usable channel
+
+Trigger: Person known but emails invalid or absent. Expected result: Retain Contact; report missing channel separately from missing person.
+
+SC-43  Third-party Account Prospect
+
+Trigger: Account cluster contains only third-party members. Expected result: Classify Prospect and expose membership evidence and resolution completeness; apply delivery gates separately.
+
+SC-44  Independent Site classification
+
+Trigger: Customer parent has first-party members at six of ten distinct Site clusters. Expected result: Classify six Sites Customer and four vendor-only Sites Prospect; retain parent links without inheritance.
+
+SC-45  Third-party Contact Prospect
+
+Trigger: Customer Account links to a third-party-only Contact cluster. Expected result: Keep Contact Prospect; retain employer Customer independently and gate delivery on rights and affiliation.
+
+SC-46  Persona gap
+
+Trigger: Known account has finance contacts but no IT buyer. Expected result: Report role coverage gap without fabricating a person or double-counting known Contacts.
+
+SC-47  Dormant customer
+
+Trigger: Historical customer lacks purchases in activity window. Expected result: Keep Customer while a retained first-party member exists; store dormant activity as a separate attribute.
+
+SC-48  Cross-channel conflict
+
+Trigger: SBA prospect already owned in another channel. Expected result: Route or suppress according to policy; no automatic ownership transfer.
+
+SC-49  Prospect becomes Customer
+
+Trigger: Accepted prospect becomes first-party customer. Expected result: Change Prospect to Customer when a first-party member joins; retain golden ID and classification history.
+
+SC-50  Vendor overlap
+
+Trigger: Three vendors contribute the same site and person. Expected result: Count each mastered entity once; show overlap and each vendor unique contribution.
+
+SC-51  Vendor rights expiry
+
+Trigger: Contract or permitted use ends. Expected result: Suppress affected output fields and activation; apply retention and replacement policies.
+
+SC-52  Match-only run
+
+Trigger: User tests candidate outcomes. Expected result: Expose output and metrics without changing current goldens.
+
+SC-53  Create golden from staging
+
+Trigger: Approved matching exists in staging. Expected result: Create using explicit policy snapshot and validate xrefs before publication.
+
+SC-54  Worker or warehouse failure
+
+Trigger: Connection fails mid-stage. Expected result: Retry or resume from checkpoint; no mixed publication or lost logical record.
+
+SC-55  API no match versus error
+
+Trigger: Lookup cannot reach candidate service. Expected result: Return error and audit correlation; never misreport completed NO_MATCH.
+
+SC-56  Concurrent stewardship
+
+Trigger: Two users edit same review case. Expected result: Detect stale version, preserve decisions, and require resolution.
+
+SC-57  Unauthorized export
+
+Trigger: Viewer attempts Contact data export. Expected result: Deny or mask under the same policy enforced on UI, API and warehouse.
+
+SC-58  1.5B footprint delta
+
+Trigger: 10M changes arrive during concurrent lookups. Expected result: Meet approved workload SLA, integrity, recovery and cost gates against resident corpus.
+
+SC-59  Deletion and restore
+
+Trigger: Deleted data exists in search cache and backup. Expected result: Purge active surfaces per policy; reapply tombstones after restore.
+
+SC-60  Full rematch
+
+Trigger: Material policy change rebuilds entire corpus. Expected result: Use versioned shadow outputs, retain justified IDs and approvals, and publish validated differences.
+
+SC-61  CRM prospect is an Entity360 Customer
+
+Trigger: CRM lead or prospect Account record joins a cluster. Expected result: Classify Customer because it is first-party; preserve CRM commercial status separately.
+
+SC-62  Last first-party member withdrawn
+
+Trigger: Mixed cluster loses its last current first-party record. Expected result: Reclassify Prospect if vendor members remain; emit classification change and update all interfaces.
+
+SC-63  Split changes class
+
+Trigger: Mixed cluster splits into first-party and vendor-only components. Expected result: Recompute each component; Customer and Prospect outputs carry corrected lineage and IDs.
+
+SC-64  First-party only cluster
+
+Trigger: A Contact cluster contains CRM data and no vendor records. Expected result: Classify Customer even without purchase or usable email.
+
+SC-65  All members deleted
+
+Trigger: A singleton loses its only current member. Expected result: Retire the entity and publish deletion; do not expose an empty Prospect.
+
+SC-66  Vendor wins all fields
+
+Trigger: Mixed cluster uses vendor name and address by survivorship. Expected result: Keep Customer because provenance membership determines class, not winning source.
+
+SC-67  Customer Contact at Prospect Account
+
+Trigger: CRM person affiliates with vendor-only employer. Expected result: Customer Contact and Prospect Account remain independently classified.
+
+SC-68  Unresolved vendor singleton
+
+Trigger: Candidate retrieval is deferred. Expected result: Publish Prospect from membership with incomplete resolution; hold duplicate-sensitive creation until evaluated.
+
+SC-69  Source category correction
+
+Trigger: Approved registry change changes a source from third party to first party. Expected result: Impact preview, recompute affected clusters, shadow validation and auditable atomic publication.
+
+SC-70  Global base directory
+
+Trigger: Admin configures base directory. Expected result: Validate canonical location and permissions; retain revision and audit.
+
+SC-71  Source directory escape
+
+Trigger: Source path or symlink points outside base. Expected result: Reject configuration; no file access outside the allowed base.
+
+SC-72  Concurrent file claim
+
+Trigger: Two workers discover one completed file. Expected result: One delivery owner; repeat observation resolves to the existing ledger entry.
+
+SC-73  Directory changed during run
+
+Trigger: Admin saves new directory revision. Expected result: Current run keeps old revision; new work uses the validated revision.
+
+SC-74  Deleted historical evidence
+
+Trigger: Deleted source ID has old names and phones. Expected result: Purge versions and derived keys; no old value participates in any future match.
+
+SC-75  Deletion breaks bridge
+
+Trigger: Deleted member joins two otherwise separate groups. Expected result: Reprocess and split correctly; rebuild golden values and classification.
+
+SC-76  Stale file after deletion
+
+Trigger: Older active version of deleted source ID arrives. Expected result: Reject or suppress reinstatement through deletion watermark; retain no reusable old evidence.
+
+SC-77  External API during first release
+
+Trigger: External consumer requests person lookup. Expected result: External interface is not deployed; internal UI functionality remains available.
+
+16 Logical data requirements and reference compatibility
+
+The physical schema is an architecture deliverable. The business model shall preserve the meaning and lineage of the supplied operational and metadata structures while extending them for Contact, Site, organization, affiliation, temporal evidence, entitlements and published versions. Referenced code paths describe the supplied design, not independently verified production behavior.
+
+Logical object
+
+Minimum content and reference alignment
+
+Source registry and run state
+
+Source definitions, delivery versions, run status, stage metrics and ownership; aligns to mdm_source_system, mdm_batch_run and mdm_batch_level_metric.
+
+Canonical source evidence
+
+Raw reference, canonical attributes, derived values, quality, event and ingestion dates; extends mdm_source_record_stg to all entity types.
+
+Candidates and match evidence
+
+Pair endpoints, bucket and key, score, reasons, feature values, decision and policy version; aligns to mdm_blocking_result and mdm_match_edge. Include decision coverage beyond only positive edges.
+
+Membership and identity
+
+Entity grain, persistent IDs, source xrefs, active flags, membership history, merge redirects and split events; extends mdm_cluster and mdm_account_xref with Contact and Site counterparts.
+
+Current and historical goldens
+
+Complete domain attributes, versions and effective dates; extends mdm_golden_account_current and mdm_golden_account_history with Contact, organization and Site views.
+
+Attribute assertions and decisions
+
+Candidate and winning values, source record, group, rule, confidence and timestamps; aligns to mdm_golden_attribute_audit.
+
+Review and duplicates
+
+Case reason, side-by-side evidence, status, assignee, decision, comments and resolution; duplicate hash, original, count, first and last seen; extends mdm_review_queue and mdm_duplicate_record.
+
+Relationships and classification
+
+Dated hierarchy and affiliations, ownership, confidence, Customer or Prospect, member counts, class reason, resolution completeness and delivery state; new logical objects.
+
+Dictionary and mapping metadata
+
+Attribute and group definitions, types, storage formats, roles, cardinality, samples, transforms and date formats; retains mdm_canonical_attribute_group, mdm_canonical_attribute and mdm_source_attribute_mapping.
+
+Rule metadata
+
+Standardization, blocking buckets, numeric and boolean matching settings, directional grouped conditions, source priorities and waterfalls; retains mdm_standardization_rule, mdm_blocking_bucket_config, mdm_matching_config, mdm_match_rule_condition and mdm_survivorship_rule.
+
+Security and configuration audit
+
+Users, roles, page permissions and configuration before and after values with approvals; retains mdm_app_user, mdm_app_role, mdm_app_role_page_permission and mdm_config_audit in a production-ready store.
+
+API and delivery audit
+
+Request and consumer identity, outcome, correlation ID, schema version and delivery acknowledgments; incorporate the reference mdm_match_api_audit behavior even though absent from the supplied 13-table DDL.
+
+
+
+16 1 Canonical attribute coverage
+
+Domain or group
+
+Required field coverage
+
+Account identity
+
+Golden organization, Account and Site IDs; source IDs and type; legal and trading name; normalized business name; alternate names; DUNS and namespaced identifiers; ultimate parent.
+
+Account addresses
+
+Lines one and two; city; state or province; postal code and ZIP plus four; country; PO-box flag; address type; unit; validity and source. Preserve typed mailing, physical, billing and shipping uses.
+
+Account channels
+
+Primary, alternate and secondary phones; normalized phones; country and area code; extension; fax where supplied; website URL, website domain and normalized domain.
+
+Account business context
+
+Status; account type; segment; industry, SIC and NAICS; annual revenue band and values where licensed; employee size; Customer or Prospect class; channel and ownership.
+
+Derived features
+
+Name prefix, phonetic key, expression-normalized business name, street number and street name, quality score, derived values and raw-payload reference.
+
+Contact identity
+
+Contact golden ID; namespaced person and source IDs; first, middle, last, full and preferred names; honorific, suffix, aliases; normalized and original forms.
+
+Contact channels and work
+
+Repeating typed email, phone and address; verification and ownership dates; job title; department; seniority; persona; employer and site affiliation; valid-from and valid-to.
+
+Governance and lineage
+
+Source and evidence timestamp; verification; quality; confidence; permission or suppression references; permitted purpose; winning source and rule; model and config version; batch; effective dates; created and updated dates.
+
+
+
+16 2 Reference issues resolved in the requirements
+
+Threshold terminology is inconsistent: the business reference proposes 0.85 automatic matching and 0.70 review, while the technical reference and seed propose 0.95 automatic matching and 0.80 or 0.85 review. MAT-07 replaces these with explicit T_auto and T_review semantics. Values remain domain-specific starting configurations, subject to validation.
+
+The reference duplicate scenario conflates normalized similarity with exact content duplication. ING-06 retains separate source identities, while matching resolves equivalent records. Likewise, a SIC code or ultimate parent is not a unique business identity; same-parent and PO-box seed rules become guarded evidence under MAT and REL policies. Equal DUNS does not universally justify ignoring contradictory identity or grain.
+
+The reference constraints of organization-only, batch-only, and read-only source integration are superseded by Account and Contact domain coverage and the phased ingestion and writeback recommendations. The reference Spark and Snowflake separation remains a viable design input, but in-memory global blocking indexes or union-find, single-file SQLite control state, and destructive full rematch are not acceptable default production strategies at this footprint.
+
+Compatibility migration shall preserve existing spelling aliases such as phoentic_business_name and postal variants zip_code_9 and zip_supp or ZIP plus four mappings until consumers transition. The technical prose also describes one physical postal suffix inconsistently; mapping must be verified against actual schema before migration. New business definitions shall use consistent names without silently breaking existing metadata.
+
+Snowflake standard-table primary-key, unique and foreign-key declarations do not enforce these integrity guarantees; see the technical design references. The solution must explicitly validate source-key uniqueness, member assignments, golden versions and relationship endpoints before publication. Database capabilities and supported DDL must be verified in the implementation environment.
+
+17 KPIs delivery plan and acceptance ownership
+
+KPI
+
+Definition and business owner
+
+Match precision and recall
+
+Adjudicated true matches over accepted matches; recovered duplicate identities over known duplicates, separated by retrieval, pair and cluster. Data Science and domain stewards.
+
+Golden completeness
+
+Populated valid required attributes over applicable required attributes, excluding fields barred by policy. Domain owner.
+
+Duplicate and review reduction
+
+Correctly consolidated duplicates and unique actionable review cases versus baseline, without reducing precision. Stewardship lead.
+
+Source contribution
+
+Unique entities, overlap, surviving attributes, quality lift and Customer and Prospect contribution by vendor and domain. Vendor and data owners.
+
+Prospect to Customer transition
+
+Prospect clusters that become Customer when first-party membership is added, with effective time and source attribution. Sales Operations and Marketing.
+
+Operational health
+
+Run success, delay, records and pairs per hour, API percentiles, deferred blocks, restart time and deletion completion. Platform operations.
+
+Economic value
+
+Measured processing and vendor costs, manual effort avoided and attributable business outcomes versus approved baseline. Sponsor and Finance.
+
+Adoption
+
+Named priority consumers using approved contracts and publication versions. Enterprise data owner.
+
+
+
+The source reference goals of 100 percent adoption of key consumers and 10x ROI are aspirations, not guaranteed benefits. Establish a baseline and attribution method before claiming savings or revenue uplift.
+
+Phase
+
+Release scope
+
+Exit gate
+
+Foundation
+
+Agree identity grains, sources, rights, canonical models, quality labels and capacity workload; retain baseline reference features.
+
+Domain owners approve definitions, labeled tests, contracts, benchmark plan and costs.
+
+Production core
+
+P0 local-disk ingestion, internal application calls, deletion repair, Account and Contact pipelines, stable identity, affiliations, history, constrained clustering, stewardship, privacy and governed publication.
+
+Domain UAT, fault recovery and quality gates pass; no unsafe identity or permission gaps.
+
+Classification and scale
+
+Customer and Prospect classification, channel checks, vendor contribution, incremental graph processing and progressive full-footprint benchmarks.
+
+Classification UAT approved; 1.5B benchmark and consumer reconciliation pass.
+
+Operational expansion
+
+P1 proposed learned matching, CDC, external APIs, duplicate prevention, validation and controlled writeback; ADLS remains deferred until separately scoped.
+
+Pilot demonstrates value and service budgets with rollback and appropriate approvals.
+
+Advanced capabilities
+
+P2 semantic retrieval, AI assistance, opportunity estimation and additional domains or regional deployments.
+
+Evidence of benefit exceeds operating costs and preserves quality and governance.
+
+
+
+Final business acceptance belongs jointly to the Account and Contact domain owners and the sponsor. Data Engineering validates pipeline and scale integrity; stewards validate identity and survivorship; security and data owners validate access and entitlements; downstream owners validate contract and replay behavior; operations validates recovery and support. Production release requires signed results for the included capability scope rather than a blanket claim that all roadmap features are delivered.
+
+17 1 Decisions required before implementation
+
+Confirm organization, commercial Account and Site grains and the exact interpretation of 1.5B resident records, including domain mix and retention.
+
+Confirm initial first-party and third-party datasets, licensing, authoritative fields, geographic scope, vendor refresh schedules and source deletion contracts.
+
+Customer and Prospect definitions are finalized by source membership. Confirm source categories, member withdrawal policy, separate activity attributes, channel ownership, routing and permissions.
+
+Approve initial thresholds, quality holdouts, high-risk auto-merge policies, steward staffing, case SLAs and approval responsibilities.
+
+Approve production platform, transactional control store, concurrency, full-load and rebuild deadlines, recovery objectives, infrastructure and monthly cost budget.
+
+Confirm which P1 capabilities enter the first funded release and which remain roadmap recommendations; preserve dependency gates.
+
+18 Reference traceability
+
+ID
+
+Supplied material
+
+Consolidated coverage
+
+R1
+
+Pasted text.txt — Entity360 Business Requirements Document
+
+All 13 functional categories preserved in ING, DQ, MAT, ID, SUR, UI, OPS and GOV; nonfunctional goals in SCALE; six business scenarios in SC-01 through SC-08 and related variants.
+
+R2
+
+Pasted text (2).txt — MDM Technical Design
+
+Processing modes, rule behavior, APIs, UI pages, errors, retry, persistence and operational objects in MAT, UI, OPS, SCALE and section 16.
+
+R3
+
+Pasted text (3).txt — Snowflake operational schema
+
+All 13 logical table responsibilities in section 16; golden fields, versions, xrefs, decisions, duplicates and review requirements retained and extended.
+
+R4
+
+Pasted text (4).txt — SQLite metadata schema
+
+All 15 metadata table responsibilities in section 16; data types, cardinality, mappings, condition directions, permissions and approval states retained.
+
+R5
+
+Pasted text (5).txt — Metadata seed configuration
+
+Source examples, roles, canonical groups, six blocking patterns, standardization derivations, algorithms, threshold settings, compound gates, source priorities and address waterfall retained as configurable policies.
+
+
+
+The seed priorities D&B then SBA bill-to then Data Axle for business name and address are supported examples, not universal defaults. The production field owner must approve source priorities separately for Accounts, Contacts and each attribute group. Seeded security credentials are not requirements and shall not be carried into production.
+
+19 Glossary
+
+Term
+
+Meaning
+
+First party
+
+Data collected or maintained by the enterprise in its own business relationships.
+
+Third party
+
+Externally supplied data governed by a source agreement and permitted-use policy.
+
+Customer
+
+A nonempty cluster with at least one current eligible first-party member.
+
+Prospect
+
+A nonempty cluster containing only current eligible third-party members.
+
+Blocking
+
+Bounded retrieval of plausible identity candidates without global all-pairs comparison.
+
+Match
+
+An evidence-based decision that records represent the same real entity at the specified grain.
+
+Clustering
+
+Grouping identity evidence into entities under positive and negative constraints.
+
+Survivorship
+
+Choosing current attribute values from eligible source assertions under an approved policy.
+
+Xref
+
+A version-aware mapping between a source identity and a persistent golden identity.
+
+Affiliation
+
+A dated relationship between a person and an organization, Account or Site.
+
+Cannot link
+
+A governed constraint preventing specified records or entities from sharing an identity.
+
+Resident record
+
+A logical source record maintained in the matching corpus, distinct from its historical versions.
+
+RPO and RTO
+
+Recovery point objective for tolerable data loss and recovery time objective for restoring service.
+
+
+
+20 Configuration workflows and operational requirements
+
+This section extends the configuration and stewardship requirements with the workflows illustrated in the thirteen supplied screenshots. Requirements describe user tasks and resulting behavior; screen layout, colors, navigation, sample counts, provider order and displayed record values are not fixed requirements. Core Account and Contact scope, local-file rollout, deletion rules and the separate API design continue to apply.
+
+20 1 Workflow and evidence map
+
+Evidence
+
+Observed process
+
+Requirements
+
+S01 image.png
+
+Sign in with credentials
+
+WF-01
+
+S02 image(1).png
+
+Dashboard and recent batch runs
+
+WF-02, WF-11
+
+S03 image(2).png
+
+Configuration and settings navigation
+
+WF-03, WF-12
+
+S04 image(3).png
+
+Canonical attribute groups
+
+WF-04
+
+S05 image(4).png
+
+Create source with file metadata
+
+WF-06
+
+S06 image(5).png
+
+Select golden attributes by group
+
+WF-07
+
+S07 image(6).png
+
+Canonical dictionary with types and matching metadata
+
+WF-05
+
+S08 image(7).png
+
+Same-row groups, anchor, source order and waterfall
+
+WF-08 to WF-10
+
+S09 image(8).png
+
+Golden record list, search, paging, columns and export
+
+WF-13
+
+
+
+The screenshots show Account examples. Equivalent Contact workflows remain required. S13 supplies a Blocking Rules view; its fields and expression definitions are captured in section 21. Matching Rules, Matching Output, Review Queue, Config Audit, User Management, Role Management, CSV Viewer and File Viewer remain menu-only evidence; existing requirements govern those workflows until detailed examples are supplied.
+
+20 2 Administration and metadata configuration
+
+WF-01  Authenticated access
+
+Users shall authenticate before accessing authorized functions. Session termination and sign out shall be supported. Identity and role are visible to the user. The credential form demonstrates sign-in behavior, not a mandate to store application passwords or a decision against enterprise SSO.
+
+Acceptance: Unauthorized requests reveal no source data; invalid credentials return a safe error; sign out ends the session. Authentication mechanism is approved before implementation.
+
+WF-02  Operational dashboard
+
+Authorized users shall see current golden record count, active registered sources, open review count and recent batches, with domain scope and refresh time. Batch history shall include ID, status, start/end, duration, ingestion count, cluster count, golden count and message when available.
+
+Acceptance: Counts agree with their filtered detail views at the same publication or snapshot. Unavailable counters are visibly unavailable, rather than silently reported as zero. Example screenshot counts are not acceptance targets.
+
+WF-03  Configuration workspaces
+
+The application shall support source onboarding, attribute groups, canonical dictionary, golden attribute eligibility, blocking and matching configuration, survivorship, operational outputs and governed settings. These functions need not use the screenshot navigation.
+
+Acceptance: Role grants govern actions independently of menu visibility; no user can change an unauthorized configuration by submitting a direct request.
+
+WF-04  Canonical attribute groups
+
+Administrators shall define unique group code, group name, description, display order and active status. Group inventory shall show total and active attribute counts. Editing or deleting referenced groups shall expose dependency impact. Dictionary groups organize attributes and are distinct from survivorship groups.
+
+Acceptance: Counts reconcile to dictionary inventory; duplicate codes and unsafe removal of referenced groups are blocked. Display order changes presentation without altering matching or survivorship behavior.
+
+WF-05  Canonical attribute dictionary
+
+Administrators shall define a stable attribute code, display title, organizational group, incoming and storage type, repeatability, matching relevance, importance category and enabled state. Type conversion, expression validation and source mapping are governed by the approved metadata release.
+
+Acceptance: Unknown types and unsafe conversions are rejected. Required operational columns cannot be disabled. Importance labels such as deterministic or strong do not alone authorize a merge; source-local IDs, hierarchy IDs and timestamps must pass domain-specific matching policy.
+
+WF-06  Source registration and file metadata
+
+Source setup shall capture source code, First Party or Third Party classification, description, category, owner, input file pattern, number of header records and active flag, alongside the globally governed incoming, processing and reject paths. Header count and file format shall be validated. An archive location shown in S05 remains optional until its disposition and retention policy are approved.
+
+Acceptance: Duplicate source codes, escaping paths, conflicting file patterns and invalid header counts are rejected. New deliveries are not claimed for an inactive source; ingestion deactivation alone does not purge members or change Customer classification. A source-category change has an impact preview before activation.
+
+WF-07  Golden attribute eligibility
+
+Administrators shall choose eligible canonical attributes for golden-record survivorship by group, inspect selected counts, select or clear optional fields and explicitly save the selection. Mandatory technical, identity, classification and provenance fields are maintained independently of business-field selection.
+
+Acceptance: Saved eligible sets survive reload, agree with selected counts and are versioned. Disabling a required operational field is blocked; dropping a field referenced by active survivorship requires a dependency-aware change.
+
+20 3 Group survivorship and controlled activation
+
+WF-08  Coherent group membership and anchor
+
+Administrators shall define survivorship group name, required anchor attribute and members selected from golden-eligible attributes. Each attribute shall belong to no more than one active survivorship group for a domain and release. A group selects one winning source row, with all grouped values taken from that row.
+
+Acceptance: An attribute cannot join two active groups; an anchor outside the group or eligible set is rejected. The business name and its grouped expression come from one row. An address cannot mix components from competing rows, including to fill a null.
+
+WF-09  Ordered sources and waterfall steps
+
+Administrators shall select contributing sources, reorder their priorities and configure an ordered waterfall with Non-Null, Source Priority, Most Frequent and Most Recent step types as demonstrated. Most Recent shall identify its business timestamp attribute; selection semantics, empty results and tie rules shall be explicit. Other selection strategies remain subject to SUR requirements.
+
+Acceptance: Saving is atomic across group members, anchor, sources and steps. The saved order is reproduced on reload. A winning-row explanation shows candidates remaining after each step and the reason for the final result. Whether source selection is a hard eligibility filter requires confirmation.
+
+WF-10  Preview and versioned rule activation
+
+Configuration changes shall validate cross-references and preview affected groups, golden records, classifications and downstream outputs before activation. Runs shall pin an approved immutable configuration revision. A saved draft shall not silently change a running batch.
+
+Acceptance: A concurrent edit raises a revision conflict; an invalid rule never activates. Approved changes trigger an affected-record backfill or governed rebuild. Rollback selects an earlier policy and schedules corrective processing; it does not erase later publications without reconciliation.
+
+20 4 Processing exploration and controlled access
+
+WF-11  Batch execution and incremental reconciliation
+
+Batch details shall correlate deliveries, source counts, stage counts, configuration revision, status, timing and publication. Delta records shall search accepted resident nondeleted evidence and same-run changes; only impacted clusters and dependent results shall be repaired where safely bounded.
+
+Acceptance: No input silently disappears. Accepted, rejected, unchanged, deleted and deferred counts reconcile under a declared counting contract. A deleted bridge causes a split when needed; stale replay cannot reinstate deleted evidence.
+
+WF-12  Administration audit and safe file inspection
+
+User and role administration, configuration audit and file/CSV inspection shall be governed functions. File inspection shall be restricted to authorized configured locations and bounded previews, with sensitive values protected and deleted payloads removed under DEL.
+
+Acceptance: A user cannot inspect an arbitrary server path. Configuration audit records actor, time, before/after revision and action without retaining reusable deleted source values. Menu-only screenshots do not define role matrices or file tool features.
+
+WF-13  Golden record exploration
+
+Users shall search golden records by name, address or domain, select visible columns, sort, page, adjust bounded page size, open entity detail and export authorized results. Details shall support member provenance, source counts, Customer/Prospect classification and survivorship explanations.
+
+Acceptance: Search and export use the same authorized scope and publication. All source strings render as text, including embedded HTML. Export applies permissions, size limits, deletion filtering and spreadsheet formula protection; selected columns cannot bypass field entitlements.
+
+20 5 Acceptance scenarios and decisions
+
+Case
+
+Expected result
+
+Group coherence
+
+A winner with a missing secondary field retains that null; another row cannot donate a component unless a separately approved policy changes the group definition.
+
+Source disabled
+
+New ingestion stops; retained members stay present. Explicit record deletion invokes purge and cluster repair.
+
+Grouped rule edit
+
+A stale revision conflicts. Save is atomic and a running job keeps its starting revision.
+
+Deleted winner
+
+All prior payload versions and derived evidence for the identity are removed; survivorship and classification recompute from remaining members.
+
+Invalid value in display
+
+HTML in a company name is escaped; export formulas are neutralized. No source text executes.
+
+Counts and pagination
+
+Displayed totals use one snapshot, have defined counting units and agree with scoped detail queries.
+
+
+
+Decisions for approval: (1) Does disabling a source only pause ingestion, as the current CLS-05 rule specifies, or is there a separate governed member-withdrawal action? (2) Is archive storage required, and what retention and deletion behavior applies? (3) Do waterfall steps evaluate all eligible cluster rows in listed order, or first select within each source and then compare source winners? (4) Are selected sources a hard candidate filter or a priority preference? (5) What value determines Most Frequent, how are null anchors handled, and what timestamp and final tie-breaker are approved? (6) Which authentication mechanism and role/action matrix are approved?
+
+Source sample values, group names, timestamps, user names, counts, selected provider order and the screenshot label Matchrome are reference examples. No screenshot count establishes production correctness, scale or performance. The visible metadata that marks timestamps and hierarchy IDs as strong or deterministic matching evidence requires business and data-quality review before it can become an executable rule.
+
+21 Ingestion time derived values and configurable blocking
+
+Users can configure derived canonical expressions. Entity360 shall calculate and persist their typed values during ingestion, after required source mapping and normalization and before candidate generation. Matching, blocking, survivorship, internal exploration and downstream delivery shall consume those stored values from the same configuration and data revision. Derived attributes are operational data, not display-only or downstream-only calculations.
+
+Evidence
+
+Process clarified
+
+Requirements
+
+S10 image(9).png
+
+Expanded batch tabs and per-file ingestion counters
+
+WF-11, EX-06
+
+S11 image(10).png
+
+Canonical editor with Derived Expression, types and role flags
+
+EX-01 to EX-03
+
+S12 image(20261002-140656).png
+
+Education flags and derived street/ZIP key in MailingAddress group
+
+EX-04
+
+S13 image(20261002-140741).png
+
+Ordered active blocking buckets with expressions or selected fields
+
+EX-05 to EX-07
+
+
+
+EX-01  Configurable derived canonical fields
+
+Authorized users shall define attribute code/title, data type and storage type, organizational group, description, derived expression, enabled flag, matching relevance and repeatability. Expressions may reference available canonical fields and other approved derived attributes. Validate dependencies, preview sample results and save a versioned configuration.
+
+Acceptance: Missing references, cycles, unsafe operations and incompatible result types block activation. Preview and ingestion produce the same typed value for the same inputs and revision. Screenshot template syntax is a compatibility example, not an approved unrestricted runtime.
+
+EX-02  Calculate and store during ingestion
+
+Every accepted record shall materialize all required enabled derived values after mapping and normalization and before blocking. Persist the results with the canonical source-record version, expression revision, evaluation state and dependency lineage. Derived chains shall execute in dependency order.
+
+Acceptance: A phone value yields its configured area-code result in stored canonical data before candidate generation. Downstream reads do not require a caller to rerun the expression. Replaying the same input and revision yields the same values.
+
+EX-03  Defined nulls and expression failures
+
+Each derived field shall declare typed null, empty input and error semantics. Boolean false and unknown shall remain distinguishable unless the approved expression explicitly resolves unknown. Failed required expressions shall prevent the dependent processing path; optional failures shall be visible under an approved policy.
+
+Acceptance: A failed expression is not silently replaced with an empty key or false flag. A required key cannot qualify a record as fully processed when its dependencies failed. Error counts and safe reason codes are visible at file, stage and batch level.
+
+EX-04  User defined derived attributes and coherent survivorship
+
+Authorized users shall define derived attributes with their own names, types, expressions and dependencies. Is Educational Institution, Is School and Is University are optional user examples; they are not mandatory platform fields and have no built-in formulas, taxonomy or relationships. The same capability applies to any approved derived attribute. Derived values selected into a coherent survivorship group shall follow that group's winning source row.
+
+Acceptance: A newly configured derived attribute is calculated during ingestion and can be selected by metadata for blocking, matching, survivorship and downstream output without code changes. Group membership and formulas are user defined. A grouped value cannot be copied from a losing row. Customer/Prospect remains the confirmed source-membership classification.
+
+EX-05  User configured blocking buckets
+
+Administrators shall configure bucket code, name, description, order, active state and a definition using selected canonical fields or a validated key expression. Derived values, including approved education flags, may be used as key components or eligibility predicates. Active configuration drives candidate generation rather than a hard-coded pass list.
+
+Acceptance: Saved order and status are reproducible. A disabled bucket produces no new candidates. A bucket previews its calculated keys and dependency values. A match-relevant flag makes a field available to rules; it does not by itself prove identity or merge records.
+
+EX-06  Version changes and incremental invalidation
+
+Changes to raw dependencies, derivations, normalization or bucket definitions shall recalculate affected stored values and invalidate old dependent keys, match evidence and golden projections through controlled processing. Existing resident records must be compatible with the active derived/bucket revision before participating.
+
+Acceptance: Changing an education rule schedules affected-record recalculation and reindexing, including resident data. New deltas cannot compare new-format keys with stale old-format postings. A deletion purges derived historical values and keys along with all other evidence from that source identity.
+
+EX-07  Safe keys and downstream lineage
+
+Blocking shall suppress empty or failed keys and constrain broad low-information buckets. Boolean education flags alone are not adequate high-cardinality identity keys at enterprise scale; combine them with discriminating fields or use them as configured eligibility conditions. Published eligible derived values shall retain source/expression lineage.
+
+Acceptance: Key serialization avoids ambiguous concatenations. Large common-value blocks are bounded, split or deferred with visibility, not silently dropped. Selected derived values are available in internal views and approved exports; future external APIs follow their separately scoped rollout.
+
+Examples shown include area_code, a business-name expression, is_education, a phonetic business name, normalized domain and street/ZIP keys. Blocking examples include NORM_DOMAIN, ADDR_ZIP_STRICT, PHONETIC_NAME_ZIP and PHONE_ZIP. They are reference examples, not production-approved rule definitions. The displayed ADDR_ZIP_STRICT label mentions six street-name characters while the visible expression uses a longer slice; the stored approved expression and its tested preview must determine behavior. A blocking description that says merge cannot replace matching and constrained clustering decisions.
+
+Each user-defined expression declares its input fields, output type and null/error policy in configuration. The platform does not require education fields or impose relationships among the example flags. Approve the supported expression language/functions, international phone/area-code handling, failure behavior and rule-version backfill policy as platform contracts; individual business formulas belong to user configuration.
+
+
+
+
+22 Configurable matching clauses and rule profiles
+
+Entity360 shall allow authorized users to configure matching rules in the application. This section extends MAT and UI requirements with the supplied clause examples and four additional Rule Configuration Studio screenshots. Derived canonical values calculated during ingestion are available to these conditions, including education flags. Blocking retrieves candidate pairs; matching evaluates the configured evidence for those pairs. The initial rollout continues to use internal application services; external consumer APIs remain deferred.
+
+22 1 Rule configuration requirements
+
+MR-01  Clause and condition authoring
+
+Users shall create, name, edit, enable, disable and retire rules. A rule shall support multiple clauses, explicit AND or OR groups, ordered conditions and visible grouping. Each condition shall capture left record and attribute, right record attribute or typed literal, operator, algorithm, tokenizer, threshold where applicable, direction and active state. Unary checks such as IS NULL shall select the record side explicitly. Canonical and ingestion-derived attributes shall use approved field mappings.
+
+Acceptance: Reload preserves the complete expression tree. Disabled conditions cannot accidentally make an empty AND clause match every pair; activation rejects an empty effective clause or rule. A literal has a validated type. Grouping and record direction are visible in preview.
+
+MR-02  Similarity and tokenizer settings
+
+Support configurable cosine and Jaccard similarity with the requested default, bigram and trigram tokenizer choices where compatible. Strict greater-than and equality are distinct operators. The interface accepts percentages and exposes their normalized score equivalents. The approved algorithm and tokenizer definitions, preprocessing and missing-value behavior shall be identified by version.
+
+Acceptance: A score of exactly 60% fails > 60%; exactly 70% fails > 70%. A condition configured = 100% requires a computed similarity of 1.0 under the approved definition. No rounding in the display changes the decision. Unsupported combinations are rejected.
+
+MR-03  Separate rule profiles and controlled activation
+
+Document the first supplied three-clause set and the Test Env four-clause set as illustrative configurations that users can save in separate profiles. No clause recipe is a built-in platform default. Do not infer that the first set is the approved production policy. Save configuration as a draft, preview its impact, approve and activate an immutable release. A running batch keeps its starting rule release.
+
+Acceptance: The profile diff identifies the raised Clause 1 thresholds, added Clause 2 address condition and new Clause 4. Promotion requires an explicit target and approval. Changing a rule schedules affected resident and incremental pair evaluation and cluster repair under the established backfill policy.
+
+MR-04  Thresholds weights and algorithm selection
+
+The application shall expose governed match and review thresholds, deterministic rule settings, feature weights and business-name algorithm enablement. The screenshots show Levenshtein, Token Sort, Partial Ratio and No Space options, with a maximum-over-enabled-methods example. Weight validation and aggregation behavior shall be explicit; a score shall not be described as a probability without calibration.
+
+Acceptance: For a normalized weighted profile, weights sum to 1 within a declared validation tolerance. Show enabled methods and aggregation in preview. The screenshot default choices and maximum aggregation remain examples pending approved policy; per-condition cosine or Jaccard selections are not silently replaced by another name algorithm.
+
+MR-05  Explainable safe matching decisions
+
+A preview shall show condition scores, pass or fail or unknown state, clause outcomes, candidate origin and rule revision. Runtime decisions shall carry sufficient safe evidence for explanation, without retaining purged source values. Matching rules remain subject to hard contradictions, entity grain, review policy and clustering constraints.
+
+Acceptance: Any passing OR clause creates the configured match evidence rather than bypassing cluster constraints. Missing values do not become a 100% similarity. Explicit IS NULL remains distinct from an empty string and from an evaluator failure. Deleted source identities never participate.
+
+22 2 Supplied clause profiles
+
+The tables below are illustrative user configurations, not built-in rules or default thresholds. The user confirmed OR between clauses for this example. Users configure the condition groups and connectors within each clause as an explicit Boolean expression; AND is supported but is not imposed. Comparisons can select left/right record fields or typed literals. The user confirmed that the earlier zite_zip5 spelling means site_zip5; the field still resolves through user-configured source-to-canonical mapping.
+
+First supplied rule set
+
+Clause
+
+Source field
+
+Comparison
+
+Algorithm
+
+Tokenizer
+
+1
+
+site_address_1
+
+> 60%
+
+Cosine
+
+Default
+
+1
+
+ml_company_name
+
+> 60%
+
+Jaccard
+
+Trigram
+
+1
+
+site_city
+
+= 100%
+
+Cosine
+
+Default
+
+2
+
+site_phone_full_number
+
+= 100%
+
+Cosine
+
+Default
+
+2
+
+site_zip5
+
+= 100%
+
+Cosine
+
+Default
+
+3
+
+site_address_1
+
+> 70%
+
+Cosine
+
+Default
+
+3
+
+business_name
+
+> 40%
+
+Cosine
+
+Default
+
+3
+
+site_zip5
+
+= 100%
+
+Cosine
+
+Default
+
+
+
+Test environment rule set
+
+Clause
+
+Source field
+
+Comparison
+
+Algorithm
+
+Tokenizer
+
+1
+
+site_address_1
+
+> 70%
+
+Cosine
+
+Default
+
+1
+
+ml_company_name
+
+> 70%
+
+Jaccard
+
+Trigram
+
+1
+
+site_city
+
+= 100%
+
+Cosine
+
+Default
+
+2
+
+site_phone_full_number
+
+= 100%
+
+Cosine
+
+Default
+
+2
+
+site_zip5
+
+= 100%
+
+Cosine
+
+Default
+
+2
+
+site_address_1
+
+> 15%
+
+Cosine
+
+Default
+
+3
+
+site_address_1
+
+> 70%
+
+Cosine
+
+Default
+
+3
+
+business_name
+
+> 40%
+
+Cosine
+
+Default
+
+3
+
+site_zip5
+
+= 100%
+
+Cosine
+
+Default
+
+4
+
+site_phone_full_number
+
+IS NULL
+
+Not applicable
+
+Not applicable
+
+4
+
+first_party_data
+
+= 100%
+
+Cosine
+
+Default
+
+4
+
+site_address_1
+
+= 100%
+
+Cosine
+
+Default
+
+4
+
+site_zip5
+
+= 100%
+
+Cosine
+
+Default
+
+4
+
+ml_company_name
+
+> 50%
+
+Jaccard
+
+Bigram
+
+
+
+22 3 Evidence and decisions
+
+S14 image(20261002-140924).png shows rule keys with global AND conditions, OR between rules, left and right attribute selection, operators, thresholds, fixed direction and active flags. S15 image(20261002-140947).png and S16 image(20261002-141617).png show business-name algorithm enablement. S17 image(20261002-141641).png shows rule creation with condition rows, attribute or literal input, record sides, direction and AND selection. Collapsed threshold, deterministic-rule and weight panels establish configuration categories but do not supply their hidden field definitions. The screenshots and the user clause text are separate examples; screenshot thresholds do not override the supplied clause values.
+
+User clarification confirms OR between clauses in the supplied example and corrects zite_zip5 to site_zip5. Neither is a hardcoded platform rule. Users configure every field, threshold, algorithm, tokenizer, record side, literal and null predicate. Clause 4 demonstrates configurable phone-null and first_party_data conditions; it does not impose their operands on other configurations. The platform must support cosine and Jaccard with selectable default, bigram and trigram tokenizers where compatible. Tokenizer semantics and algorithm versions must be explicit and validated; business formulas and clause recipes remain user data.
+
+
+
+
+23 Configurable source policies and cluster limits
+
+All business-derived attributes, source selections, matching conditions, thresholds and source membership limits shall be metadata driven. The system shall not contain embedded rules for MDR, DNB, Salesforce, education flags or any other example source or attribute. Users shall be able to introduce a source, derived field, pair policy or cluster limit through configuration, using the supported engine operations. Required technical columns and the confirmed Customer/Prospect definition remain the existing platform contracts.
+
+23 1 Source specific matching configuration
+
+SP-01  Source pair and attribute policies
+
+Authorized users shall define matching policies scoped to entity domain and left/right sources, including same-source and cross-source pairs. Within a policy, users shall configure attribute mappings, exact equality or similarity algorithm, tokenizer, threshold, AND/OR groups, direction and active state. Different attributes and source pairs may use different thresholds. Both canonical and ingestion-derived attributes are selectable.
+
+Acceptance: A configured MDR-to-MDR policy requires school name and address equality, while separately configured MDR-to-DNB and MDR-to-Salesforce policies permit chosen fuzzy comparisons. These source names and attributes are examples only. Preview shows the effective policy for either record order.
+
+SP-02  Mandatory gates and policy precedence
+
+Users shall distinguish mandatory source-scoped conditions from alternative qualifying clauses. For example, exact school-name and address requirements for a same-source pair shall be enforced as mandatory gates across all applicable match paths. Configuration shall define source scope, precedence and fallback behavior for overlapping specific, source-category and general rules.
+
+Acceptance: A global fuzzy rule or another OR clause cannot bypass the applicable mandatory equality gates. Conflicting equal-precedence policies are rejected or require an explicit resolution. No applicable policy is visible as an unresolved policy case, with no implicit automatic match.
+
+23 2 Configurable cluster cardinality
+
+SP-03  Source membership constraints
+
+Users shall configure a maximum number of distinct current source records allowed in a resulting cluster, scoped by source and entity domain. Support a conditional rule of the form if the prospective cluster satisfies a configured source-presence condition, then a configured target source has at most N records. A source can be both trigger and target. The MDR example sets the MDR limit to one.
+
+Acceptance: Two current logical MDR records cannot coexist in a cluster governed by limit one, even if their attributes match exactly. Versions of the same source record do not increase the count. No source limit exists unless configured; engine resource bounds remain separately governed.
+
+SP-04  Enforcement across the entire resulting cluster
+
+Validate the complete prospective membership before accepting a merge, assigning a new record, activating an incremental repair or publishing a rebuilt cluster. Limits shall apply to indirect paths through other sources as well as direct same-source pairs. A steward action cannot override a configured hard limit without an authorized policy change and revalidation.
+
+Acceptance: If MDR-A matches DNB-B and DNB-B matches MDR-C, the system prevents a resulting cluster containing MDR-A and MDR-C when the MDR limit is one. DNB-B cannot bridge around the constraint. Concurrent processing cannot publish a violating cluster.
+
+SP-05  Configuration impact and operational explanation
+
+Users shall create, preview, approve, activate and audit versioned source-pair policies and membership constraints. A rule change shall identify affected pairs and clusters, including resident data, and schedule re-evaluation and repair. Conflict handling, review routing and deterministic selection policy shall be configured or approved and visible.
+
+Acceptance: Reducing a source limit causes existing violating clusters to be repaired or held from new publication under a declared transition policy. Explanations identify the constraint, source count, limit, affected identities, policy revision and blocked merge. Matching success and cluster admission are reported separately.
+
+23 3 Illustrative MDR configuration
+
+Configuration scope
+
+User configured behavior
+
+MDR versus MDR
+
+Mandatory exact equality for configured school-name and address fields. This establishes pair compatibility only; the source limit still applies.
+
+MDR versus DNB
+
+Configured fuzzy name/address comparisons with user-selected algorithms, tokenizers and per-attribute thresholds.
+
+MDR versus Salesforce
+
+Separately configured fuzzy comparisons; thresholds may differ from the DNB policy.
+
+Resulting cluster
+
+When MDR is present, maximum distinct current MDR records = 1. Check the entire prospective cluster.
+
+Other sources and attributes
+
+Use their own configured policies and limits. No MDR settings, fuzzy percentages or education formulas are platform defaults.
+
+
+
+With a limit of one, even two exactly matching MDR records cannot join the same cluster as distinct current members. A second delivery of the same source ID is an update or replay handled by ingestion, not a second logical member. Consolidating distinct source IDs before mastering is not assumed and cannot silently circumvent the limit. If same-source exact matches should actually coexist, the user must configure a different limit or a separately approved record-consolidation policy.
+
+Acceptance cases include: one MDR record with fuzzy-matched DNB and Salesforce records is allowed when their pair policies and other gates pass; two MDR records connected through one or multiple third-source records are blocked from the same cluster; no configured source limit means no business cardinality restriction for that source; deleting a constrained-source member purges its evidence and repairs the cluster; adding a new user-defined derived field enables configured rule use without a software change. Entity domain and exact-comparison normalization are selected during configuration. Clause operands and null checks are entered by the user; no fixed Clause 4 behavior is required.
+
+Entity360 Business Requirements  |
